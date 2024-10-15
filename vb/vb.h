@@ -20,10 +20,11 @@
 #ifndef NDEBUG
 #define VB_ASSERT(FN) assert(FN);
 #else
-#define VB_ASSERT(FN) if(!(FN)) { vb::log(#FN " failed"); }
+#define VB_ASSERT(FN) if(!(FN)) { vb::log(#FN " failed"); exit(1); }
 #endif
 
 namespace vb {
+    constexpr const char* this_full_name {"vulkan boilerstrap"};
     struct Context;
     struct ContextDependant {
 	Context* ctx;
@@ -70,15 +71,6 @@ namespace vb {
     	uint32_t present_index;
     };
 
-    struct VulkanExtensionSupport {
-	bool acceleration_structure {false};
-	bool raytracing_pipeline {false};
-	bool rayquery {false};
-	bool pipeline_library {false};
-	bool deferred_host_operations {false};
-	bool meshshader {false};
-    };
-
     struct Context {
 	struct Info {
 	    std::string title;
@@ -86,14 +78,22 @@ namespace vb {
     	    uint32_t height;
 	    SDL_InitFlags sdl3_init_flags;
 	    SDL_WindowFlags sdl3_window_flags;
+
+	    uint32_t api_version;
+
+	    std::vector<const char*> required_extensions;
+	    std::vector<const char*> optional_extensions;
+	    bool enable_all_available_extensions;
+
+	    VkPhysicalDeviceFeatures vk10features;
+	    VkPhysicalDeviceVulkan11Features vk11features;
+	    VkPhysicalDeviceVulkan12Features vk12features;
+	    VkPhysicalDeviceVulkan13Features vk13features;
+	    bool enable_all_available_features;
     	};
 
 	Info info;
 	SDL_Window* window {nullptr};
-
-	VulkanExtensionSupport extension_support{};
-	bool raytracing {false};
-	bool meshshader {false};
 
 	VmaAllocator vma_allocator;
 	VkInstance instance;
@@ -126,6 +126,8 @@ namespace vb {
 	Context(const Info& context_info);
 	~Context();
 
+	const std::vector<const char*>& get_enabled_extensions() const { return requested_extensions; }
+
 	void create_swapchain_framebuffers(VkRenderPass render_pass, std::vector<VkImageView> attachments = {});
 	void destroy_swapchain_framebuffers();
 	void recreate_swapchain(VkRenderPass render_pass);
@@ -146,6 +148,9 @@ namespace vb {
 	}
 
 	private:
+	    std::vector<const char*> available_extensions;
+	    std::vector<const char*> requested_extensions;
+
 	    void create_instance();
 	    void pick_physical_device();
 	    void create_surface();

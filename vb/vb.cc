@@ -521,11 +521,22 @@ namespace vb {
 	auto sdl_extensions = SDL_Vulkan_GetInstanceExtensions(&extension_count);
 	VB_ASSERT(sdl_extensions);
 	std::vector<const char*> extensions {sdl_extensions, sdl_extensions + extension_count};
-	extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+	{
+	    uint32_t count;
+	    vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
+	    VkExtensionProperties instance_ext[count];
+	    vkEnumerateInstanceExtensionProperties(nullptr, &count, instance_ext);
+	    for(auto extension: instance_ext)
+		if(strcmp(extension.extensionName, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) == 0)
+		    extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+	}
 	if(validation_layers_support) extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	if(info.api_version == 0) info.api_version = VK_API_VERSION_1_0;
 	VkApplicationInfo app = {
     	    .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-    	    .apiVersion = VK_API_VERSION_1_3,
+	    .pApplicationName = info.title.c_str(),
+	    .pEngineName = this_full_name,
+    	    .apiVersion = info.api_version,
 	};
 	VkInstanceCreateInfo info = {
 	    .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
@@ -566,33 +577,29 @@ namespace vb {
 	    vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &count, nullptr);
 	    VkExtensionProperties extensions[count];
 	    vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &count, extensions);
-	    log("GPU Extensions:");
-	    for(auto& ext: extensions) {
-		if(strcmp(ext.extensionName, "VK_KHR_acceleration_structure") == 0) extension_support.acceleration_structure = true;
-		if(strcmp(ext.extensionName, "VK_KHR_ray_tracing_pipeline") == 0) extension_support.raytracing_pipeline = true;
-		if(strcmp(ext.extensionName, "VK_KHR_ray_query") == 0) extension_support.rayquery = true;
-		if(strcmp(ext.extensionName, "VK_KHR_pipeline_library") == 0) extension_support.pipeline_library = true;
-		if(strcmp(ext.extensionName, "VK_KHR_deferred_host_operations") == 0) extension_support.deferred_host_operations = true;
-		if(strcmp(ext.extensionName, "VK_EXT_mesh_shader") == 0) extension_support.meshshader = true;
-		log(std::format("\t{}",ext.extensionName));
+	    available_extensions.resize(count);
+	    for(size_t i = 0; i < count; i++) available_extensions[i] = extensions[i].extensionName;
+	    size_t found_required = 0;
+	    for(auto& required: info.required_extensions) {
+		for(auto& extension: extensions) {
+		    if(strcmp(extension.extensionName, required) == 0) {
+			log(std::format("Required extension {} available", required));
+			found_required++;
+		    }
+		}
+	    }
+	    VB_ASSERT(found_required == info.required_extensions.size());
+	    requested_extensions.insert(requested_extensions.end(),
+		    info.required_extensions.begin(), info.required_extensions.end());
+	    for(auto& optional: info.optional_extensions) {
+		for(auto& extension: extensions) {
+		    if(strcmp(extension.extensionName, optional) == 0) {
+			requested_extensions.push_back(optional);
+			log(std::format("Optional extension {} available", optional));
+		    }
+		}
 	    }
 	}
-    	VkPhysicalDeviceVulkan13Features vk13features = {
-	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES
-	};
-    	VkPhysicalDeviceVulkan12Features vk12features = {
-    	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-    	    .pNext = &vk13features,
-    	};
-    	VkPhysicalDeviceFeatures2 features = {
-    	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-    	    .pNext = &vk12features,
-    	};
-    	vkGetPhysicalDeviceFeatures2(physical_device, &features);
-	VB_ASSERT(vk12features.bufferDeviceAddress == VK_TRUE);
-	VB_ASSERT(vk12features.descriptorIndexing == VK_TRUE);
-	VB_ASSERT(vk12features.imagelessFramebuffer == VK_TRUE);
-	VB_ASSERT(vk12features.separateDepthStencilLayouts == VK_TRUE);
     }
 
     void Context::create_surface() {
@@ -628,36 +635,30 @@ namespace vb {
     	    };
 	    queue_infos.push_back(info);
     	}
-    	VkPhysicalDeviceVulkan13Features vk13features = {
-	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES
-	};
-    	VkPhysicalDeviceVulkan12Features vk12features = {
-    	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-    	    .pNext = &vk13features,
-	    .descriptorIndexing = VK_TRUE,
-	    .imagelessFramebuffer = VK_TRUE,
-	    .separateDepthStencilLayouts = VK_TRUE,
-	    .bufferDeviceAddress = VK_TRUE,
-    	};
+    	VkPhysicalDeviceVulkan13Features vk13features = info.vk13features;
+	vk13features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    	VkPhysicalDeviceVulkan12Features vk12features = info.vk12features;
+    	vk12features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    	vk12features.pNext = &vk13features;
+    	VkPhysicalDeviceVulkan11Features vk11features = info.vk11features;
+    	vk11features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+    	vk11features.pNext = &vk12features;
+	VkPhysicalDeviceFeatures vk10features = info.vk10features;
     	VkPhysicalDeviceFeatures2 features = {
     	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-    	    .pNext = &vk12features,
+    	    .pNext = &vk11features,
+	    .features = vk10features,
     	};
-	std::vector<const char*> extensions;
-    	extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-	if(extension_support.acceleration_structure) extensions.push_back("VK_KHR_acceleration_structure");
-	if(extension_support.raytracing_pipeline) extensions.push_back("VK_KHR_ray_tracing_pipeline");
-	if(extension_support.rayquery) extensions.push_back("VK_KHR_ray_query");
-	if(extension_support.pipeline_library) extensions.push_back("VK_KHR_pipeline_library");
-	if(extension_support.deferred_host_operations) extensions.push_back("VK_KHR_deferred_host_operations");
-	if(extension_support.meshshader) extensions.push_back("VK_EXT_mesh_shader");
+	if(info.enable_all_available_features) vkGetPhysicalDeviceFeatures2(physical_device, &features);
+	if(info.enable_all_available_extensions) requested_extensions = available_extensions;
+    	requested_extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     	VkDeviceCreateInfo info = {
     	    .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
     	    .pNext = &vk12features,
     	    .queueCreateInfoCount = (uint32_t)queue_infos.size(),
     	    .pQueueCreateInfos = queue_infos.data(),
-    	    .enabledExtensionCount = (uint32_t)extensions.size(),
-    	    .ppEnabledExtensionNames = extensions.data(),
+    	    .enabledExtensionCount = (uint32_t)requested_extensions.size(),
+    	    .ppEnabledExtensionNames = requested_extensions.data(),
     	    .pEnabledFeatures = &features.features,
     	};
 #ifndef NDEBUG

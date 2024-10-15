@@ -2,6 +2,7 @@
 #include <SDL3/SDL_events.h>
 #include <memory>
 #include <vb.h>
+#include <format>
 #include <vulkan/vulkan_core.h>
 
 struct Vertex {
@@ -57,12 +58,21 @@ struct Rectangle {
 };
 
 int main(int argc, char** argv) {
+    VkPhysicalDeviceVulkan12Features vk12features = {
+	.separateDepthStencilLayouts = VK_TRUE,
+	.bufferDeviceAddress = VK_TRUE,
+    };
     auto info = vb::Context::Info {
 	.title = "vbc",
 	.width = 800,
 	.height = 600,
+	.api_version = VK_API_VERSION_1_2,
+	.optional_extensions = {"VK_EXT_mesh_shader"},
+	.vk12features = vk12features,
     };
     auto vbc = std::make_unique<vb::Context>(info);
+
+    for(auto& e: vbc->get_enabled_extensions()) vb::log(std::format("{}",e));
 
     const std::vector<Vertex> vertices = {
     	{{-0.5f, -0.5f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
