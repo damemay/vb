@@ -1,13 +1,14 @@
 #pragma once
 
-#include <optional>
-#include <vulkan/vulkan_core.h>
 #define GLM_ENABLE_EXPERIMENTAL
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
 #include <string>
 #include <functional>
 #include <deque>
+#include <optional>
+#include <span>
+#include <vulkan/vulkan_core.h>
 #include <glm/glm.hpp>
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.h>
@@ -41,6 +42,12 @@ namespace vb {
 }
 
 namespace vb {
+    struct QuickCommand {
+	VkCommandPool cmd_pool;
+	VkCommandBuffer cmd_buffer;
+	VkFence fence;
+    };
+
     struct Frame {
 	VkCommandPool cmd_pool;
 	VkCommandBuffer cmd_buffer;
@@ -105,6 +112,8 @@ namespace vb {
 	Frame frames[max_frames];
 	uint8_t frame_index {0};
 
+	QuickCommand quick_command_info;
+
     	static constexpr const char* validation_layer_name[1] {"VK_LAYER_KHRONOS_validation"};
 	bool validation_layers_support {false};
 #ifndef NDEBUG
@@ -117,6 +126,8 @@ namespace vb {
 	void create_swapchain_framebuffers(VkRenderPass render_pass);
 	void destroy_swapchain_framebuffers();
 	void recreate_swapchain(VkRenderPass render_pass);
+
+	void submit_quick_command(std::function<void(VkCommandBuffer cmd)>&& fn);
 
 	inline Frame* get_current_frame() { return &frames[frame_index % max_frames]; }
 	inline std::optional<uint32_t> wait_on_image_reset_fence(Frame* frame) {
@@ -141,6 +152,7 @@ namespace vb {
 	    void destroy_swapchain();
 	    void create_frames();
 	    void init_vma();
+	    void init_quick_cmd();
 #ifndef NDEBUG
 	    VkDebugUtilsMessengerCreateInfoEXT fill_debug_messenger_create_info();
 	    void create_debug_messenger();
@@ -203,12 +215,46 @@ namespace vb::fill {
 }
 
 namespace vb::create {
+    struct Descriptor : public ContextDependant {
+	struct Ratio {
+	    VkDescriptorType type;
+	    float ratio;
+	};
+
+	Descriptor(Context* context): ContextDependant{context} {}
+	void create(std::span<Ratio> pool_ratios, uint32_t init_sets = 1000, VkDescriptorPoolCreateFlags flags = 0);
+	std::optional<VkDescriptorSet> allocate(VkDescriptorSetLayout layout, void* next = nullptr);
+	void flush();
+	void clean();
+
+	private:
+    	    uint32_t sets;
+    	    std::vector<Ratio> ratios;
+    	    std::vector<VkDescriptorPool> full_pools;
+    	    std::vector<VkDescriptorPool> ready_pools;
+
+	    std::optional<VkDescriptorPool> get_pool();
+	    std::optional<VkDescriptorPool> create_pool(std::span<Ratio> pool_ratios, uint32_t init_sets, VkDescriptorPoolCreateFlags flags = 0);
+    };
+
+    struct Buffer: public ContextDependant {
+	std::optional<VkBuffer> buffer {std::nullopt};
+	std::optional<VmaAllocation> allocation {std::nullopt};
+	std::optional<VmaAllocationInfo> info {std::nullopt};
+
+	Buffer(Context* context): ContextDependant{context} {}
+	void create(const size_t size, VkBufferCreateFlags usage, VmaMemoryUsage mem_usage);
+	void clean();
+    };
+
     std::optional<VkShaderModule> shader_module(VkDevice device, const char* path);
 
     struct GraphicsPipeline: public ContextDependant {
 	private:
 	    std::vector<VkShaderModule> shader_modules;
 	    std::vector<VkPipelineShaderStageCreateInfo> shader_stages;
+	    std::vector<VkPushConstantRange> push_constants;
+
 	    VkPipelineInputAssemblyStateCreateInfo input_assembly = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
 		.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
@@ -233,6 +279,8 @@ namespace vb::create {
 
 	    void add_shader(VkShaderModule& shader_module, VkShaderStageFlagBits stage);
 	    void add_shader(const char* path, VkShaderStageFlagBits stage);
+
+	    void add_push_constant(const uint32_t size, VkShaderStageFlagBits stage, const uint32_t offset = 0);
 
 	    inline void set_topology(VkPrimitiveTopology topology) { input_assembly.topology = topology; }
 	    inline void set_polygon_mode(VkPolygonMode mode) { rasterization.polygonMode = mode; }

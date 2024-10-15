@@ -1,7 +1,9 @@
+#include <glm/vector_relational.hpp>
 #include <set>
 #include <format>
 #include <fstream>
 #include <SDL3/SDL_vulkan.h>
+#include <unistd.h>
 #include <vulkan/vulkan_core.h>
 #include <vb.h>
 
@@ -78,6 +80,109 @@ namespace vb::fill {
 }
 
 namespace vb::create {
+    void Descriptor::create(std::span<Ratio> pool_ratios, uint32_t init_sets, VkDescriptorPoolCreateFlags flags) {
+	ratios.clear();
+	for(auto ratio: pool_ratios) ratios.push_back(ratio);
+	auto pool = create_pool(pool_ratios, init_sets, flags);
+	if(!pool.has_value()) return;
+	sets = init_sets * 1.5f;
+	ready_pools.push_back(pool.value());
+    }
+
+    std::optional<VkDescriptorSet> Descriptor::allocate(VkDescriptorSetLayout layout, void* next) {
+	auto pool = get_pool();
+	if(!pool.has_value()) return std::nullopt;
+	VkDescriptorSetAllocateInfo info = {
+	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+	    .pNext = next,
+	    .descriptorPool = pool.value(),
+	    .descriptorSetCount = 1,
+	    .pSetLayouts = &layout,
+	};
+	VkDescriptorSet set;
+	VkResult result = vkAllocateDescriptorSets(ctx->device, &info, &set);
+	if(result == VK_ERROR_OUT_OF_POOL_MEMORY || result == VK_ERROR_FRAGMENTED_POOL) {
+	    full_pools.push_back(pool.value());
+	    pool = get_pool();
+	    if(!pool.has_value()) return std::nullopt;
+	    info.descriptorPool = pool.value();
+	    if(vkAllocateDescriptorSets(ctx->device, &info, &set) != VK_SUCCESS) return std::nullopt;
+	}
+	ready_pools.push_back(pool.value());
+	return set;
+    }
+
+    void Descriptor::flush() {
+	for(auto pool: ready_pools) vkResetDescriptorPool(ctx->device, pool, 0);
+	for(auto pool: full_pools) {
+	    vkResetDescriptorPool(ctx->device, pool, 0);
+	    ready_pools.push_back(pool);
+	}
+	full_pools.clear();
+    }
+
+    void Descriptor::clean() {
+	for(auto pool: ready_pools) vkDestroyDescriptorPool(ctx->device, pool, nullptr);
+	for(auto pool: full_pools) vkDestroyDescriptorPool(ctx->device, pool, nullptr);
+	ready_pools.clear();
+	full_pools.clear();
+    }
+
+    std::optional<VkDescriptorPool> Descriptor::get_pool() {
+	if(ready_pools.size() != 0) {
+	    auto pool = ready_pools.back();
+	    ready_pools.pop_back();
+	    return pool;
+	}
+	auto pool = create_pool(ratios, sets);
+	if(!pool.has_value()) return std::nullopt;
+	sets *= 1.5f;
+	if(sets > 4092) sets = 4092;
+	return pool.value();
+    }
+
+    std::optional<VkDescriptorPool> Descriptor::create_pool(std::span<Ratio> pool_ratios, uint32_t init_sets, VkDescriptorPoolCreateFlags flags) {
+	std::vector<VkDescriptorPoolSize> sizes(pool_ratios.size());
+	for(size_t i = 0; i < pool_ratios.size(); i++) {
+	    sizes[i].type = pool_ratios[i].type;
+	    sizes[i].descriptorCount = (uint32_t)(pool_ratios[i].ratio*init_sets);
+	}
+	VkDescriptorPoolCreateInfo info = {
+	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+	    .flags = flags,
+	    .maxSets = init_sets,
+	    .poolSizeCount = (uint32_t)sizes.size(),
+	    .pPoolSizes = sizes.data(),
+	};
+	VkDescriptorPool pool;
+	if(vkCreateDescriptorPool(ctx->device, &info, nullptr, &pool) != VK_SUCCESS) return std::nullopt;
+	return pool;
+    }
+
+    void Buffer::create(const size_t size, VkBufferCreateFlags usage, VmaMemoryUsage mem_usage) {
+	VkBufferCreateInfo buffer_info = {
+	    .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+	    .size = size,
+	    .usage = usage,
+	};
+	VmaAllocationCreateInfo allocation_info = {
+	    .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT,
+	    .usage = mem_usage,
+	};
+
+	VkBuffer temp_buffer;
+	VmaAllocation temp_allocation;
+	VmaAllocationInfo temp_allocation_info;
+	if(vmaCreateBuffer(ctx->vma_allocator, &buffer_info, &allocation_info, &temp_buffer, &temp_allocation, &temp_allocation_info) != VK_SUCCESS) return;
+	buffer = temp_buffer;
+	allocation = temp_allocation;
+	info = temp_allocation_info;
+    }
+
+    void Buffer::clean() {
+	vmaDestroyBuffer(ctx->vma_allocator, buffer.value(), allocation.value());
+    }
+
     std::optional<VkShaderModule> shader_module(VkDevice device, const char* path) {
 	std::ifstream file {path, std::ios::ate | std::ios::binary};
 	if(!file.is_open()) return std::nullopt;
@@ -112,6 +217,11 @@ namespace vb::create {
 	add_shader(module.value(), stage);
     }
 
+    void GraphicsPipeline::add_push_constant(const uint32_t size, VkShaderStageFlagBits stage, const uint32_t offset) {
+	VkPushConstantRange range = {stage, offset, size};
+	push_constants.push_back(range);
+    }
+
     void GraphicsPipeline::create(VkRenderPass render_pass, uint32_t subpass_index) {
 	VkPipelineVertexInputStateCreateInfo vertex_input = {
 	    .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -144,6 +254,8 @@ namespace vb::create {
         };
 	VkPipelineLayoutCreateInfo pipeline_layout = {
 	    .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+	    .pushConstantRangeCount = (uint32_t)push_constants.size(),
+	    .pPushConstantRanges = push_constants.size() == 0 ? nullptr : push_constants.data(),
 	};
 	VkPipelineLayout temp_layout;
 	if(vkCreatePipelineLayout(ctx->device, &pipeline_layout, nullptr, &temp_layout) != VK_SUCCESS) return;
@@ -169,7 +281,10 @@ namespace vb::create {
         if(vkCreateGraphicsPipelines(ctx->device, VK_NULL_HANDLE, 1, &info, NULL, &temp_pipeline) != VK_SUCCESS) return;
 	pipeline = temp_pipeline;
 	
-	for(auto& shader: shader_modules) vkDestroyShaderModule(ctx->device, shader, nullptr);
+	for(auto& shader: shader_modules) {
+	    vkDestroyShaderModule(ctx->device, shader, nullptr);
+	    shader_modules.clear();
+	}
     }
 
     void GraphicsPipeline::clean() {
@@ -273,9 +388,12 @@ namespace vb {
 	create_swapchain_image_views();
 	create_frames();
 	init_vma();
+	init_quick_cmd();
     }
 
     Context::~Context() {
+	vkDestroyCommandPool(device, quick_command_info.cmd_pool, nullptr);
+    	vkDestroyFence(device, quick_command_info.fence, nullptr);
 	vmaDestroyAllocator(vma_allocator);
 	for(auto& frame: frames) {
 	    vkDestroyCommandPool(device, frame.cmd_pool, nullptr);
@@ -298,6 +416,20 @@ namespace vb {
 	SDL_Quit();
     }
 
+    void Context::submit_quick_command(std::function<void(VkCommandBuffer cmd)>&& fn) {
+	vkResetFences(device, 1, &quick_command_info.fence);
+	vkResetCommandBuffer(quick_command_info.cmd_buffer, 0);
+	VkCommandBufferBeginInfo begin = {
+	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+	    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+	};
+	VB_ASSERT(vkBeginCommandBuffer(quick_command_info.cmd_buffer, &begin) == VK_SUCCESS);
+	fn(quick_command_info.cmd_buffer);
+	render::end_command_buffer(quick_command_info.cmd_buffer);
+	render::submit_queue(queues_info.graphics_queue, quick_command_info.fence, {quick_command_info.cmd_buffer}, {}, {}, {});
+	vkWaitForFences(device, 1, &quick_command_info.fence, 1, UINT64_MAX);
+    }
+
     void Context::create_instance() {
 	uint32_t extension_count = 0;
 	auto sdl_extensions = SDL_Vulkan_GetInstanceExtensions(&extension_count);
@@ -307,7 +439,7 @@ namespace vb {
 	if(validation_layers_support) extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 	VkApplicationInfo app = {
     	    .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-    	    .apiVersion = VK_API_VERSION_1_2,
+    	    .apiVersion = VK_API_VERSION_1_3,
 	};
 	VkInstanceCreateInfo info = {
 	    .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
@@ -615,6 +747,12 @@ namespace vb {
         VB_ASSERT(vmaCreateAllocator(&info, &vma_allocator) == VK_SUCCESS);
     }
 
+    void Context::init_quick_cmd() {
+	quick_command_info.cmd_pool = create::cmd_pool(device, queues_info.graphics_index, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);;
+	auto info = fill::cmd_buffer_allocate_info(quick_command_info.cmd_pool);
+	VB_ASSERT(vkAllocateCommandBuffers(device, &info, &quick_command_info.cmd_buffer) == VK_SUCCESS);
+	quick_command_info.fence = create::fence(device);
+    }
 
 #ifndef NDEBUG
     bool Context::test_for_validation_layers() {
