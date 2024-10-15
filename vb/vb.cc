@@ -183,6 +183,95 @@ namespace vb::create {
 	vmaDestroyBuffer(ctx->vma_allocator, buffer.value(), allocation.value());
     }
 
+    void Image::create(VkExtent3D extent, VkFormat format, VkImageUsageFlags usage, bool mipmap) {
+    	this->format = format;
+    	this->extent = extent;
+    	VkImageCreateInfo image_info = {
+    	    .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+	    .imageType = VK_IMAGE_TYPE_2D,
+	    .format = format,
+	    .extent = extent,
+	    .mipLevels = 1,
+	    .arrayLayers = 1,
+	    .samples = VK_SAMPLE_COUNT_1_BIT,
+	    .tiling = VK_IMAGE_TILING_OPTIMAL,
+	    .usage = usage,
+    	};
+	if(mipmap) image_info.mipLevels = (uint32_t)(floorf(std::max(extent.width, extent.height)))+1;
+    	VmaAllocationCreateInfo allocation_info = {
+    		.usage = VMA_MEMORY_USAGE_GPU_ONLY,
+    		.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+    	};
+
+	VkImage temp_image;
+	VmaAllocation temp_allocation;
+    	if(vmaCreateImage(ctx->vma_allocator, &image_info, &allocation_info, &temp_image, &temp_allocation, nullptr) != VK_SUCCESS) return;
+	image = temp_image;
+	allocation = temp_allocation;
+
+	VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+	if(format == VK_FORMAT_D32_SFLOAT) aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+    	VkImageViewCreateInfo info = {
+    	    .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+    	    .image = image.value(),
+    	    .viewType = VK_IMAGE_VIEW_TYPE_2D,
+    	    .format = format,
+    	    .subresourceRange = {
+    	       .aspectMask = aspect,
+		.levelCount = 1,
+		.layerCount = 1,
+    	    },
+    	};
+	VkImageView temp_image_view;
+	if(vkCreateImageView(ctx->device, &info, nullptr, &temp_image_view) != VK_SUCCESS) return;
+	image_view = temp_image_view;
+    }
+
+    void Image::create(void* data, VkExtent3D extent, VkFormat format, VkImageUsageFlags usage, bool mipmap) {
+	size_t data_size = extent.depth * extent.width * extent.height * 4;
+	auto staging_buffer = Buffer(ctx);
+	staging_buffer.create(data_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	memcpy(staging_buffer.info->pMappedData, data, data_size);
+	ctx->submit_quick_command([&](VkCommandBuffer cmd) {
+	    // image::transition(cmd, vk_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	    // VkBufferImageCopy copy = {
+	    //     .imageSubresource = {
+	    //         .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	    //         .layerCount = 1,
+	    //     },
+	    //     .imageExtent = extent,
+	    // };
+	    // vkCmdCopyBufferToImage(cmd, staging_buffer.vk_buffer, vk_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+	    // image::transition(cmd, vk_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	});
+    }
+
+    void Image::clean() {
+	vkDestroyImageView(ctx->device, image_view.value(), nullptr);
+	vmaDestroyImage(ctx->vma_allocator, image.value(), allocation.value());
+    }
+
+//     void Subpass::create(VkPipelineBindPoint bind_point, VkSubpassDescriptionFlags flags) {
+// 	if(depth_attachment.size() > 1) return;
+// 	if(resolve_attachments.size() != 0 && resolve_attachments.size() != color_attachments.size()) return;
+// 	auto inputs = get_input_references();
+// 	auto colors = get_color_references();
+// 	auto resolves = get_resolve_references();
+// 	auto depth = get_depth_references();
+// 	VkSubpassDescription subpass {
+// 	    flags,
+// 	    bind_point,
+// 	    (uint32_t)inputs.size(),
+// 	    inputs.empty() ? nullptr : inputs.data(),
+// 	    (uint32_t)colors.size(),
+// 	    colors.empty() ? nullptr : colors.data(),
+// 	    resolves.empty() ? nullptr : resolves.data(),
+// 	    depth.empty() ? nullptr : depth.data(),
+// 	    (uint32_t)preserve_attachments.size(),
+// 	    preserve_attachments.empty() ? nullptr : preserve_attachments.data(),
+// 	};
+//     }
+
     std::optional<VkShaderModule> shader_module(VkDevice device, const char* path) {
 	std::ifstream file {path, std::ios::ate | std::ios::binary};
 	if(!file.is_open()) return std::nullopt;
@@ -230,9 +319,6 @@ namespace vb::create {
 	    .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
 	    .viewportCount = 1,
 	    .scissorCount = 1,
-        };
-        VkPipelineDepthStencilStateCreateInfo depth_stencil = {
-	   .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
         };
         VkPipelineColorBlendAttachmentState color_blend_attachment = {
 	    .blendEnable = VK_FALSE,
@@ -505,6 +591,8 @@ namespace vb {
     	vkGetPhysicalDeviceFeatures2(physical_device, &features);
 	VB_ASSERT(vk12features.bufferDeviceAddress == VK_TRUE);
 	VB_ASSERT(vk12features.descriptorIndexing == VK_TRUE);
+	VB_ASSERT(vk12features.imagelessFramebuffer == VK_TRUE);
+	VB_ASSERT(vk12features.separateDepthStencilLayouts == VK_TRUE);
     }
 
     void Context::create_surface() {
@@ -546,12 +634,15 @@ namespace vb {
     	VkPhysicalDeviceVulkan12Features vk12features = {
     	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
     	    .pNext = &vk13features,
+	    .descriptorIndexing = VK_TRUE,
+	    .imagelessFramebuffer = VK_TRUE,
+	    .separateDepthStencilLayouts = VK_TRUE,
+	    .bufferDeviceAddress = VK_TRUE,
     	};
     	VkPhysicalDeviceFeatures2 features = {
     	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
     	    .pNext = &vk12features,
     	};
-    	vkGetPhysicalDeviceFeatures2(physical_device, &features);
 	std::vector<const char*> extensions;
     	extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
 	if(extension_support.acceleration_structure) extensions.push_back("VK_KHR_acceleration_structure");
@@ -576,12 +667,9 @@ namespace vb {
     	}
 #endif
     	VB_ASSERT(vkCreateDevice(physical_device, &info, nullptr, &device) == VK_SUCCESS);
-    	vkGetDeviceQueue(device, queues_info.graphics_index,
-		0, &queues_info.graphics_queue);
-    	vkGetDeviceQueue(device, queues_info.compute_index,
-		0, &queues_info.compute_queue);
-    	vkGetDeviceQueue(device, queues_info.present_index,
-		0, &queues_info.present_queue);
+    	vkGetDeviceQueue(device, queues_info.graphics_index, 0, &queues_info.graphics_queue);
+    	vkGetDeviceQueue(device, queues_info.compute_index, 0, &queues_info.compute_queue);
+    	vkGetDeviceQueue(device, queues_info.present_index, 0, &queues_info.present_queue);
     }
 
     void Context::create_swapchain(uint32_t width, uint32_t height) {
@@ -687,15 +775,16 @@ namespace vb {
     	}
     }
 
-    void Context::create_swapchain_framebuffers(VkRenderPass render_pass) {
+    void Context::create_swapchain_framebuffers(VkRenderPass render_pass, std::vector<VkImageView> attachments) {
 	swapchain_framebuffers.resize(swapchain_image_views.size());
 	for(size_t i = 0; i < swapchain_framebuffers.size(); i++) {
-	    VkImageView attachments[1] = {swapchain_image_views[i]};
+	    std::vector<VkImageView> internal_attachments {swapchain_image_views[i]};
+	    if(!attachments.empty()) internal_attachments.insert(internal_attachments.end(), attachments.begin(), attachments.end());
 	    VkFramebufferCreateInfo info = {
 		.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
 		.renderPass = render_pass,
-		.attachmentCount = 1,
-		.pAttachments = attachments,
+		.attachmentCount = (uint32_t)internal_attachments.size(),
+		.pAttachments = internal_attachments.data(),
 		.width = swapchain_extent.width,
 		.height = swapchain_extent.height,
 		.layers = 1,

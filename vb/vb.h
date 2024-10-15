@@ -1,5 +1,6 @@
 #pragma once
 
+#define GLM_FORCE_RADIANS
 #define GLM_ENABLE_EXPERIMENTAL
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
@@ -10,6 +11,8 @@
 #include <span>
 #include <vulkan/vulkan_core.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/transform.hpp>
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
@@ -123,7 +126,7 @@ namespace vb {
 	Context(const Info& context_info);
 	~Context();
 
-	void create_swapchain_framebuffers(VkRenderPass render_pass);
+	void create_swapchain_framebuffers(VkRenderPass render_pass, std::vector<VkImageView> attachments = {});
 	void destroy_swapchain_framebuffers();
 	void recreate_swapchain(VkRenderPass render_pass);
 
@@ -215,6 +218,23 @@ namespace vb::fill {
 }
 
 namespace vb::create {
+    VkCommandPool cmd_pool(VkDevice device, uint32_t queue_family_index,
+	    VkCommandPoolCreateFlags flags);
+    VkSemaphore semaphore(VkDevice device, VkSemaphoreCreateFlags flags = 0);
+    VkFence fence(VkDevice device, VkFenceCreateFlags flags = 0);
+    VkDescriptorSetLayout descriptor_set_layout(VkDevice device,
+	    std::vector<VkDescriptorSetLayoutBinding> bindings,
+	    VkShaderStageFlags stages,
+	    VkDescriptorSetLayoutCreateFlags flags,
+	    void* next);
+    VkPipeline compute_pipeline(VkDevice device,
+	    VkPipelineLayout layout,
+	    VkShaderModule shader_module);
+
+    std::optional<VkShaderModule> shader_module(VkDevice device, const char* path);
+
+    struct OptionalValidator {virtual bool all_valid() = 0;};
+
     struct Descriptor : public ContextDependant {
 	struct Ratio {
 	    VkDescriptorType type;
@@ -237,19 +257,88 @@ namespace vb::create {
 	    std::optional<VkDescriptorPool> create_pool(std::span<Ratio> pool_ratios, uint32_t init_sets, VkDescriptorPoolCreateFlags flags = 0);
     };
 
-    struct Buffer: public ContextDependant {
+    struct Buffer: public ContextDependant, public OptionalValidator {
 	std::optional<VkBuffer> buffer {std::nullopt};
 	std::optional<VmaAllocation> allocation {std::nullopt};
 	std::optional<VmaAllocationInfo> info {std::nullopt};
+	bool all_valid() {return buffer.has_value() && allocation.has_value() && info.has_value();}
 
 	Buffer(Context* context): ContextDependant{context} {}
 	void create(const size_t size, VkBufferCreateFlags usage, VmaMemoryUsage mem_usage);
 	void clean();
     };
 
-    std::optional<VkShaderModule> shader_module(VkDevice device, const char* path);
+    struct Image: public ContextDependant, public OptionalValidator {
+	std::optional<VkImage> image {std::nullopt};
+	std::optional<VkImageView> image_view {std::nullopt};
+	std::optional<VmaAllocation> allocation {std::nullopt};
+	bool all_valid() {return image.has_value() && image_view.has_value() && allocation.has_value();}
 
-    struct GraphicsPipeline: public ContextDependant {
+	VkExtent3D extent;
+	VkFormat format;
+	Image(Context* context): ContextDependant{context} {}
+	void create(VkExtent3D extent, VkFormat format = VK_FORMAT_R16G16B16A16_SFLOAT,
+		VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT 
+		| VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+		bool mipmap = false);
+	void create(void* data, VkExtent3D extent, VkFormat format = VK_FORMAT_R16G16B16A16_SFLOAT,
+		VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT 
+		| VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+		bool mipmap = false);
+	void clean();
+    };
+
+//     struct Subpass : public OptionalValidator {
+// 	std::optional<VkSubpassDescription> description {std::nullopt};
+// 	bool all_valid() {return description.has_value();}
+// 
+// 	struct Attachment {
+// 	    VkAttachmentDescription description;
+// 	    VkAttachmentReference reference;
+// 	};
+// 	uint32_t attachment_index {0};
+// 	std::vector<Attachment> input_attachments;
+// 	std::vector<Attachment> color_attachments;
+// 	std::vector<Attachment> resolve_attachments;
+// 	std::vector<Attachment> depth_attachment;
+// 	std::vector<uint32_t> preserve_attachments;
+// 
+// #define VB_ADD_ATTACHMENT(NAME, VECTOR) \
+//     void NAME(VkAttachmentDescription& description, VkImageLayout subpass_layout) { \
+// 	VkAttachmentReference ref { attachment_index++, subpass_layout }; \
+// 	VECTOR.push_back({description, ref}); \
+//     }
+// 	VB_ADD_ATTACHMENT(add_input_attachment, input_attachments)
+//     	VB_ADD_ATTACHMENT(add_color_attachment, color_attachments)
+//     	VB_ADD_ATTACHMENT(add_resolve_attachment, resolve_attachments)
+//     	VB_ADD_ATTACHMENT(add_depth_attachment, depth_attachment)
+// #undef VB_ADD_ATTACHMENT
+// 	void add_preserve_attachment(const uint32_t index) {preserve_attachments.push_back(index);}
+// #define VB_GET_REFERENCES(NAME, VECTOR) \
+//     std::vector<VkAttachmentReference> NAME() { \
+// 	std::vector<VkAttachmentReference> references; \
+// 	if(VECTOR.size() != 0) for(auto attachment: VECTOR) \
+//     	    references.push_back(attachment.reference); \
+// 	return references; \
+//     }
+//     VB_GET_REFERENCES(get_input_references, input_attachments)
+//     VB_GET_REFERENCES(get_color_references, color_attachments)
+//     VB_GET_REFERENCES(get_resolve_references, resolve_attachments)
+//     VB_GET_REFERENCES(get_depth_references, depth_attachment)
+// #undef VB_GET_REFERENCE
+// 	void create(VkPipelineBindPoint bind_point, VkSubpassDescriptionFlags flags = 0);
+//     };
+// 
+//     struct RenderPass: public ContextDependant, public OptionalValidator {
+// 	std::optional<VkRenderPass> render_pass {std::nullopt};
+// 	bool all_valid() {return render_pass.has_value();}
+// 
+// 	std::vector<VkSubpassDependency> subpass_dependencies;
+// 
+// 	void add_subpassk
+//     };
+
+    struct GraphicsPipeline: public ContextDependant, public OptionalValidator {
 	private:
 	    std::vector<VkShaderModule> shader_modules;
 	    std::vector<VkPipelineShaderStageCreateInfo> shader_stages;
@@ -273,6 +362,12 @@ namespace vb::create {
 		.sampleShadingEnable = VK_FALSE,
 		.minSampleShading = 1.0f,
 	    };
+	    VkPipelineDepthStencilStateCreateInfo depth_stencil = {
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+		.depthCompareOp = VK_COMPARE_OP_LESS,
+		.minDepthBounds = 0.0f,
+		.maxDepthBounds = 1.0f,
+	    };
 
 	public:
 	    GraphicsPipeline(Context* context): ContextDependant{context} {}
@@ -282,31 +377,29 @@ namespace vb::create {
 
 	    void add_push_constant(const uint32_t size, VkShaderStageFlagBits stage, const uint32_t offset = 0);
 
+	    // input assembly
 	    inline void set_topology(VkPrimitiveTopology topology) { input_assembly.topology = topology; }
+	    // rasterization
 	    inline void set_polygon_mode(VkPolygonMode mode) { rasterization.polygonMode = mode; }
 	    inline void set_cull_mode(VkCullModeFlags mode) { rasterization.cullMode = mode; }
 	    inline void set_front_face(VkFrontFace face) { rasterization.frontFace = face; }
+	    // multisample
 	    inline void set_sample_count(VkSampleCountFlagBits count) { multisample.rasterizationSamples = count; }
 	    inline void enable_sample_shading(float min_sample = 1.0f) { multisample.sampleShadingEnable = VK_TRUE; multisample.minSampleShading = min_sample; }
+	    // detph stencil
+	    inline void enable_depth_test() { depth_stencil.depthTestEnable = VK_TRUE; depth_stencil.depthWriteEnable = VK_TRUE; }
+	    inline void set_depth_comparison(VkCompareOp operation) { depth_stencil.depthCompareOp =operation; }
+	    inline void enable_depth_bounds_test() { depth_stencil.depthBoundsTestEnable = VK_TRUE; }
+	    inline void set_depth_bounds(float min, float max) { depth_stencil.minDepthBounds = min; depth_stencil.maxDepthBounds = max; }
+	    inline void enable_stencil_test() { depth_stencil.stencilTestEnable = VK_TRUE; }
+	    inline void set_stencil_operations(VkStencilOpState front, VkStencilOpState back) { depth_stencil.front = front; depth_stencil.back = back; }
 
 	    std::optional<VkPipelineLayout> layout {std::nullopt};
 	    std::optional<VkPipeline> pipeline {std::nullopt};
+	    bool all_valid() {return layout.has_value() && pipeline.has_value();}
 
 	    void create(VkRenderPass render_pass, uint32_t subpass_index);
 	    void clean();
     };
-
-    VkCommandPool cmd_pool(VkDevice device, uint32_t queue_family_index,
-	    VkCommandPoolCreateFlags flags);
-    VkSemaphore semaphore(VkDevice device, VkSemaphoreCreateFlags flags = 0);
-    VkFence fence(VkDevice device, VkFenceCreateFlags flags = 0);
-    VkDescriptorSetLayout descriptor_set_layout(VkDevice device,
-	    std::vector<VkDescriptorSetLayoutBinding> bindings,
-	    VkShaderStageFlags stages,
-	    VkDescriptorSetLayoutCreateFlags flags,
-	    void* next);
-    VkPipeline compute_pipeline(VkDevice device,
-	    VkPipelineLayout layout,
-	    VkShaderModule shader_module);
 }
 
