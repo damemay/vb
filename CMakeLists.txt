@@ -44,7 +44,7 @@ if(SAMPLE)
     #    ext/imgui/backends/imgui_impl_sdl3.cpp
     #    ext/imgui/backends/imgui_impl_vulkan.cpp
     #)
-    add_library(VMA samples/dep/vma.cc)
+    add_library(VMA ext/vma.cc)
     file(GLOB files "samples/*.cc")
     foreach(file ${files})
         get_filename_component(sample ${file} NAME_WLE)
