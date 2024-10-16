@@ -45,6 +45,7 @@ if(SAMPLE)
     #    ext/imgui/backends/imgui_impl_vulkan.cpp
     #)
     add_library(VMA ext/vma.cc)
+    add_library(STB ext/stb.cc)
     file(GLOB files "samples/*.cc")
     foreach(file ${files})
         get_filename_component(sample ${file} NAME_WLE)
@@ -57,6 +58,7 @@ if(SAMPLE)
     	    #fastgltf::fastgltf
 	    glm::glm
 	    VMA
+	    STB
     	    #IMGUI
 	    m
         )
