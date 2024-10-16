@@ -417,7 +417,7 @@ namespace vb::builder {
 	push_constants.push_back(range);
     }
 
-    void GraphicsPipeline::create(VkRenderPass render_pass, uint32_t subpass_index) {
+    void GraphicsPipeline::create(VkRenderPass render_pass, uint32_t subpass_index, std::vector<VkDescriptorSetLayout> descriptor_layouts) {
 	VkPipelineVertexInputStateCreateInfo vertex_input = {
 	    .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         };
@@ -446,6 +446,8 @@ namespace vb::builder {
         };
 	VkPipelineLayoutCreateInfo pipeline_layout = {
 	    .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+	    .setLayoutCount = (uint32_t)descriptor_layouts.size(),
+	    .pSetLayouts = descriptor_layouts.empty() ? nullptr : descriptor_layouts.data(),
 	    .pushConstantRangeCount = (uint32_t)push_constants.size(),
 	    .pPushConstantRanges = push_constants.size() == 0 ? nullptr : push_constants.data(),
 	};

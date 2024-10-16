@@ -303,6 +303,7 @@ namespace vb::builder {
 	    std::vector<VkShaderModule> shader_modules;
 	    std::vector<VkPipelineShaderStageCreateInfo> shader_stages;
 	    std::vector<VkPushConstantRange> push_constants;
+	    std::vector<VkDescriptorSetLayout> descriptor_set_layouts;
 
 	    VkPipelineInputAssemblyStateCreateInfo input_assembly = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -358,7 +359,7 @@ namespace vb::builder {
 	    std::optional<VkPipeline> pipeline {std::nullopt};
 	    bool all_valid() {return layout.has_value() && pipeline.has_value();}
 
-	    void create(VkRenderPass render_pass, uint32_t subpass_index);
+	    void create(VkRenderPass render_pass, uint32_t subpass_index, std::vector<VkDescriptorSetLayout> descriptor_layouts = {});
 	    void clean();
     };
 }
