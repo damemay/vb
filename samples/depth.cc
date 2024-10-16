@@ -58,17 +58,10 @@ struct Rectangle {
 };
 
 int main(int argc, char** argv) {
-    VkPhysicalDeviceVulkan12Features vk12features = {
-	.separateDepthStencilLayouts = VK_TRUE,
-	.bufferDeviceAddress = VK_TRUE,
-    };
     auto info = vb::Context::Info {
 	.title = "vbc",
 	.width = 800,
 	.height = 600,
-	.api_version = VK_API_VERSION_1_2,
-	.optional_extensions = {"VK_EXT_mesh_shader"},
-	.vk12features = vk12features,
     };
     auto vbc = std::make_unique<vb::Context>(info);
 

@@ -80,7 +80,7 @@ namespace vb::fill {
 }
 
 namespace vb::sync {
-    void transtition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout) {
+    void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout) {
 	VkPipelineStageFlags source;
 	VkPipelineStageFlags destination;
 	VkImageMemoryBarrier barrier = {
@@ -105,6 +105,28 @@ namespace vb::sync {
 	    destination = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
 	}
 	vkCmdPipelineBarrier(cmd, source, destination, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    }
+
+    void transition_image2(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout) {
+	VkImageMemoryBarrier2 barrier = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+	    .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+	    .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+	    .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+	    .dstAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT,
+	    .oldLayout = old_layout,
+	    .newLayout = new_layout,
+	    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .image = image,
+	    .subresourceRange = fill::image_subresource_range(new_layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT),
+	};
+	VkDependencyInfo dependency = {
+	    .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+	    .imageMemoryBarrierCount = 1,
+	    .pImageMemoryBarriers = &barrier,
+	};
+	vkCmdPipelineBarrier2(cmd, &dependency);
     }
 }
 
@@ -354,7 +376,7 @@ namespace vb::builder {
 	create(extent, format, usage, mipmap);
 	if(!all_valid()) return;
 	ctx->submit_quick_command([&](VkCommandBuffer cmd) {
-	    sync::transtition_image(cmd, image.value(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	    sync::transition_image(cmd, image.value(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 	    VkBufferImageCopy copy = {
 	        .imageSubresource = {
 	            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -362,8 +384,9 @@ namespace vb::builder {
 	        },
 	        .imageExtent = extent,
 	    };
+	    log(std::format("{}", extent.width*extent.height*extent.depth*4));
 	    vkCmdCopyBufferToImage(cmd, staging_buffer.buffer.value(), image.value(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-	    sync::transtition_image(cmd, image.value(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	    sync::transition_image(cmd, image.value(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	});
 	staging_buffer.clean();
     }
@@ -533,26 +556,28 @@ namespace vb {
 	auto sdl_extensions = SDL_Vulkan_GetInstanceExtensions(&extension_count);
 	VB_ASSERT(sdl_extensions);
 	std::vector<const char*> extensions {sdl_extensions, sdl_extensions + extension_count};
+	bool portability_ext = false;
 	{
 	    uint32_t count;
 	    vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
 	    VkExtensionProperties instance_ext[count];
 	    vkEnumerateInstanceExtensionProperties(nullptr, &count, instance_ext);
-	    for(auto extension: instance_ext)
-		if(strcmp(extension.extensionName, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) == 0)
+	    for(auto extension: instance_ext) {
+		if(strcmp(extension.extensionName, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) == 0) {
 		    extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+		    portability_ext = true;
+		}
+	    }
 	}
 	if(validation_layers_support) extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-	if(info.api_version == 0) info.api_version = VK_API_VERSION_1_0;
 	VkApplicationInfo app = {
     	    .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
 	    .pApplicationName = info.title.c_str(),
-	    .pEngineName = this_full_name,
-    	    .apiVersion = info.api_version,
+    	    .apiVersion = api_version,
 	};
 	VkInstanceCreateInfo info = {
 	    .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-	    .flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR,
+	    .flags = portability_ext ? VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR : (VkInstanceCreateFlagBits)0,
 	    .pApplicationInfo = &app,
 	    .enabledExtensionCount = (uint32_t)extensions.size(),
 	    .ppEnabledExtensionNames = (const char**)extensions.data(),
@@ -649,8 +674,11 @@ namespace vb {
     	}
     	VkPhysicalDeviceVulkan13Features vk13features = info.vk13features;
 	vk13features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+	vk13features.synchronization2 = VK_TRUE;
     	VkPhysicalDeviceVulkan12Features vk12features = info.vk12features;
     	vk12features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+	vk12features.separateDepthStencilLayouts = VK_TRUE;
+	vk12features.bufferDeviceAddress = VK_TRUE;
     	vk12features.pNext = &vk13features;
     	VkPhysicalDeviceVulkan11Features vk11features = info.vk11features;
     	vk11features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
@@ -700,14 +728,14 @@ namespace vb {
     	VkPresentModeKHR present_modes[present_mode_count];
     	vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &format_count, formats);
     	vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device, surface, &present_mode_count, present_modes);
-    	for(size_t i = 0; i < format_count; i++) {
-    	    if(formats[i].format == VK_FORMAT_B8G8R8A8_SRGB && formats[i].colorSpace == VK_COLORSPACE_SRGB_NONLINEAR_KHR) {
-    	        format = formats[i];
-    	        break;
-    	    }
-    	}
+	for(auto surface: formats) {
+	    if(surface.format == info.surface_format.format && surface.colorSpace == info.surface_format.colorSpace) {
+		format = surface;
+		break;
+	    }
+	}
     	for(size_t i = 0; i < present_mode_count; i++) {
-    	    if(present_modes[i] == VK_PRESENT_MODE_MAILBOX_KHR) {
+    	    if(present_modes[i] == info.present_mode) {
     	        present_mode = present_modes[i];
     	        break;
     	    }
@@ -724,8 +752,7 @@ namespace vb {
 		    surface_capabilities.maxImageExtent.height);
     	}
     	image_count = surface_capabilities.minImageCount + 1;
-    	if(surface_capabilities.maxImageCount > 0
-		&& image_count > surface_capabilities.maxImageCount)
+    	if(surface_capabilities.maxImageCount > 0 && image_count > surface_capabilities.maxImageCount)
     	    image_count = surface_capabilities.maxImageCount;
 	std::set<uint32_t> unique_indices = {
 	    queues_info.graphics_index,
@@ -742,8 +769,7 @@ namespace vb {
     	    .imageExtent = extent,
     	    .imageArrayLayers = 1,
     	    .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-    	    .imageSharingMode = indices.size() > 1 
-		? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE,
+    	    .imageSharingMode = indices.size() > 1 ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE,
     	    .queueFamilyIndexCount = (uint32_t)indices.size(),
     	    .pQueueFamilyIndices = indices.data(),
     	    .preTransform = surface_capabilities.currentTransform,

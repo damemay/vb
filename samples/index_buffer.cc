@@ -13,15 +13,10 @@ struct PushConstants {
 };
 
 int main(int argc, char** argv) {
-    VkPhysicalDeviceVulkan12Features features = {
-	.bufferDeviceAddress = VK_TRUE,
-    };
     auto info = vb::Context::Info {
 	.title = "vbc",
 	.width = 800,
 	.height = 600,
-	.api_version = VK_API_VERSION_1_2,
-	.vk12features = features,
     };
     auto vbc = std::make_unique<vb::Context>(info);
 

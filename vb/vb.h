@@ -24,7 +24,6 @@
 #endif
 
 namespace vb {
-    constexpr const char* this_full_name {"vulkan boilerstrap"};
     struct Context;
     struct ContextDependant {
 	Context* ctx;
@@ -72,6 +71,8 @@ namespace vb {
     };
 
     struct Context {
+	constexpr static uint32_t api_version = VK_API_VERSION_1_3;
+
 	struct Info {
 	    std::string title;
 	    uint32_t width;
@@ -79,17 +80,18 @@ namespace vb {
 	    SDL_InitFlags sdl3_init_flags;
 	    SDL_WindowFlags sdl3_window_flags;
 
-	    uint32_t api_version;
-
 	    std::vector<const char*> required_extensions;
 	    std::vector<const char*> optional_extensions;
-	    bool enable_all_available_extensions;
+	    bool enable_all_available_extensions = false;
 
 	    VkPhysicalDeviceFeatures vk10features;
 	    VkPhysicalDeviceVulkan11Features vk11features;
 	    VkPhysicalDeviceVulkan12Features vk12features;
 	    VkPhysicalDeviceVulkan13Features vk13features;
-	    bool enable_all_available_features;
+	    bool enable_all_available_features = false;
+
+	    VkSurfaceFormatKHR surface_format = {VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+	    VkPresentModeKHR present_mode = VK_PRESENT_MODE_MAILBOX_KHR;
     	};
 
 	Info info;
@@ -210,7 +212,8 @@ namespace vb::render {
 }
 
 namespace vb::sync {
-    void transtition_image(VkCommandBuffer cmd, VkImage image, VkFormat format, VkImageLayout old_layout, VkImageLayout new_layout);
+    void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
+    void transition_image2(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
 }
 
 namespace vb::fill {
@@ -286,13 +289,11 @@ namespace vb::builder {
 	VkExtent3D extent;
 	VkFormat format;
 	Image(Context* context): ContextDependant{context} {}
-	void create(VkExtent3D extent, VkFormat format = VK_FORMAT_R16G16B16A16_SFLOAT,
-		VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT 
-		| VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+	void create(VkExtent3D extent, VkFormat format = VK_FORMAT_R8G8B8A8_SRGB,
+		VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT  | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 		bool mipmap = false);
-	void create(void* data, VkExtent3D extent, VkFormat format = VK_FORMAT_R16G16B16A16_SFLOAT,
-		VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT 
-		| VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+	void create(void* data, VkExtent3D extent, VkFormat format = VK_FORMAT_R8G8B8A8_SRGB,
+		VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 		bool mipmap = false);
 	void clean();
     };
