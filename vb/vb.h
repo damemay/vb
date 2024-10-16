@@ -209,6 +209,10 @@ namespace vb::render {
     }
 }
 
+namespace vb::sync {
+    void transtition_image(VkCommandBuffer cmd, VkImage image, VkFormat format, VkImageLayout old_layout, VkImageLayout new_layout);
+}
+
 namespace vb::fill {
     VkCommandBufferAllocateInfo cmd_buffer_allocate_info(VkCommandPool pool, uint32_t count = 1);
 
@@ -235,11 +239,11 @@ namespace vb::create {
     VkPipeline compute_pipeline(VkDevice device,
 	    VkPipelineLayout layout,
 	    VkShaderModule shader_module);
-
     std::optional<VkShaderModule> shader_module(VkDevice device, const char* path);
+}
 
+namespace vb::builder {
     struct OptionalValidator {virtual bool all_valid() = 0;};
-
     struct Descriptor : public ContextDependant {
 	struct Ratio {
 	    VkDescriptorType type;
@@ -292,56 +296,6 @@ namespace vb::create {
 		bool mipmap = false);
 	void clean();
     };
-
-//     struct Subpass : public OptionalValidator {
-// 	std::optional<VkSubpassDescription> description {std::nullopt};
-// 	bool all_valid() {return description.has_value();}
-// 
-// 	struct Attachment {
-// 	    VkAttachmentDescription description;
-// 	    VkAttachmentReference reference;
-// 	};
-// 	uint32_t attachment_index {0};
-// 	std::vector<Attachment> input_attachments;
-// 	std::vector<Attachment> color_attachments;
-// 	std::vector<Attachment> resolve_attachments;
-// 	std::vector<Attachment> depth_attachment;
-// 	std::vector<uint32_t> preserve_attachments;
-// 
-// #define VB_ADD_ATTACHMENT(NAME, VECTOR) \
-//     void NAME(VkAttachmentDescription& description, VkImageLayout subpass_layout) { \
-// 	VkAttachmentReference ref { attachment_index++, subpass_layout }; \
-// 	VECTOR.push_back({description, ref}); \
-//     }
-// 	VB_ADD_ATTACHMENT(add_input_attachment, input_attachments)
-//     	VB_ADD_ATTACHMENT(add_color_attachment, color_attachments)
-//     	VB_ADD_ATTACHMENT(add_resolve_attachment, resolve_attachments)
-//     	VB_ADD_ATTACHMENT(add_depth_attachment, depth_attachment)
-// #undef VB_ADD_ATTACHMENT
-// 	void add_preserve_attachment(const uint32_t index) {preserve_attachments.push_back(index);}
-// #define VB_GET_REFERENCES(NAME, VECTOR) \
-//     std::vector<VkAttachmentReference> NAME() { \
-// 	std::vector<VkAttachmentReference> references; \
-// 	if(VECTOR.size() != 0) for(auto attachment: VECTOR) \
-//     	    references.push_back(attachment.reference); \
-// 	return references; \
-//     }
-//     VB_GET_REFERENCES(get_input_references, input_attachments)
-//     VB_GET_REFERENCES(get_color_references, color_attachments)
-//     VB_GET_REFERENCES(get_resolve_references, resolve_attachments)
-//     VB_GET_REFERENCES(get_depth_references, depth_attachment)
-// #undef VB_GET_REFERENCE
-// 	void create(VkPipelineBindPoint bind_point, VkSubpassDescriptionFlags flags = 0);
-//     };
-// 
-//     struct RenderPass: public ContextDependant, public OptionalValidator {
-// 	std::optional<VkRenderPass> render_pass {std::nullopt};
-// 	bool all_valid() {return render_pass.has_value();}
-// 
-// 	std::vector<VkSubpassDependency> subpass_dependencies;
-// 
-// 	void add_subpassk
-//     };
 
     struct GraphicsPipeline: public ContextDependant, public OptionalValidator {
 	private:

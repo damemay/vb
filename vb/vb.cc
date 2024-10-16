@@ -79,7 +79,126 @@ namespace vb::fill {
     }
 }
 
+namespace vb::sync {
+    void transtition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout) {
+	VkPipelineStageFlags source;
+	VkPipelineStageFlags destination;
+	VkImageMemoryBarrier barrier = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+	    .oldLayout = old_layout,
+	    .newLayout = new_layout,
+	    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .image = image,
+	    .subresourceRange = fill::image_subresource_range(new_layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT),
+	};
+	if(old_layout == VK_IMAGE_LAYOUT_UNDEFINED && new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+	    barrier.srcAccessMask = 0;
+	    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	    source = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+	    destination = VK_PIPELINE_STAGE_TRANSFER_BIT;
+	}
+	if(old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+	    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	    source = VK_PIPELINE_STAGE_TRANSFER_BIT;
+	    destination = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	}
+	vkCmdPipelineBarrier(cmd, source, destination, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    }
+}
+
 namespace vb::create {
+    std::optional<VkShaderModule> shader_module(VkDevice device, const char* path) {
+	std::ifstream file {path, std::ios::ate | std::ios::binary};
+	if(!file.is_open()) return std::nullopt;
+	size_t size = file.tellg();
+	std::vector<uint32_t> buffer (size / sizeof(uint32_t));
+	file.seekg(0);
+	file.read((char*)buffer.data(), size);
+	file.close();
+        VkShaderModuleCreateInfo info = {
+	    .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+	    .codeSize = size,
+	    .pCode = buffer.data(),
+        };
+        VkShaderModule shader;
+        if(vkCreateShaderModule(device, &info, NULL, &shader) != VK_SUCCESS) return std::nullopt;
+        return shader;
+    }
+
+    VkCommandPool cmd_pool(VkDevice device, uint32_t queue_family_index,
+	    VkCommandPoolCreateFlags flags) {
+	VkCommandPoolCreateInfo info = {
+	    .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+    	    .flags = flags,
+    	    .queueFamilyIndex = queue_family_index,
+    	};
+	VkCommandPool pool;
+	VB_ASSERT(vkCreateCommandPool(device, &info, nullptr, &pool) == VK_SUCCESS);
+	return pool;
+    }
+
+    VkSemaphore semaphore(VkDevice device, VkSemaphoreCreateFlags flags) {
+        VkSemaphoreCreateInfo info = {
+	   .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+    	   .flags = flags,
+           };
+        VkSemaphore semaphore;
+        VB_ASSERT(vkCreateSemaphore(device, &info, NULL, &semaphore) == VK_SUCCESS);
+        return semaphore;
+    }
+    
+    VkFence fence(VkDevice device, VkFenceCreateFlags flags) {
+        VkFenceCreateInfo info = {
+	    .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+	    .flags = flags,
+        };
+        VkFence fence;
+        VB_ASSERT(vkCreateFence(device, &info, NULL, &fence) == VK_SUCCESS);
+        return fence;
+    }
+
+    VkDescriptorSetLayout descriptor_set_layout(VkDevice device,
+	    std::vector<VkDescriptorSetLayoutBinding> bindings,
+	    VkShaderStageFlags stages,
+	    VkDescriptorSetLayoutCreateFlags flags,
+	    void* next) {
+	if(stages) for(auto& binding: bindings)
+	    binding.stageFlags |= stages;
+	VkDescriptorSetLayoutCreateInfo info = {
+	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+	    .pNext = next,
+	    .flags = flags,
+	    .bindingCount = (uint32_t)bindings.size(),
+	    .pBindings = bindings.data(),
+	};
+	VkDescriptorSetLayout set;
+	VB_ASSERT(vkCreateDescriptorSetLayout(device, &info, NULL, &set) == VK_SUCCESS);
+	return set;
+    }
+    
+    VkPipeline compute_pipeline(VkDevice device,
+	    VkPipelineLayout layout,
+	    VkShaderModule shader_module) {
+        VkPipelineShaderStageCreateInfo shader_info = {
+	   .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+    	   .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+    	   .module = shader_module,
+    	   .pName = "main",
+        };
+        VkComputePipelineCreateInfo info = {
+	   .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+    	   .stage = shader_info,
+    	   .layout = layout,
+        };
+        VkPipeline pipeline;
+        VB_ASSERT(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &info, NULL, &pipeline) == VK_SUCCESS);
+        return pipeline;
+    }
+}
+
+namespace vb::builder {
     void Descriptor::create(std::span<Ratio> pool_ratios, uint32_t init_sets, VkDescriptorPoolCreateFlags flags) {
 	ratios.clear();
 	for(auto ratio: pool_ratios) ratios.push_back(ratio);
@@ -232,62 +351,25 @@ namespace vb::create {
 	auto staging_buffer = Buffer(ctx);
 	staging_buffer.create(data_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 	memcpy(staging_buffer.info->pMappedData, data, data_size);
+	create(extent, format, usage, mipmap);
+	if(!all_valid()) return;
 	ctx->submit_quick_command([&](VkCommandBuffer cmd) {
-	    // image::transition(cmd, vk_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-	    // VkBufferImageCopy copy = {
-	    //     .imageSubresource = {
-	    //         .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-	    //         .layerCount = 1,
-	    //     },
-	    //     .imageExtent = extent,
-	    // };
-	    // vkCmdCopyBufferToImage(cmd, staging_buffer.vk_buffer, vk_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-	    // image::transition(cmd, vk_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	    sync::transtition_image(cmd, image.value(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	    VkBufferImageCopy copy = {
+	        .imageSubresource = {
+	            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	            .layerCount = 1,
+	        },
+	        .imageExtent = extent,
+	    };
+	    vkCmdCopyBufferToImage(cmd, staging_buffer.buffer.value(), image.value(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+	    sync::transtition_image(cmd, image.value(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	});
     }
 
     void Image::clean() {
 	vkDestroyImageView(ctx->device, image_view.value(), nullptr);
 	vmaDestroyImage(ctx->vma_allocator, image.value(), allocation.value());
-    }
-
-//     void Subpass::create(VkPipelineBindPoint bind_point, VkSubpassDescriptionFlags flags) {
-// 	if(depth_attachment.size() > 1) return;
-// 	if(resolve_attachments.size() != 0 && resolve_attachments.size() != color_attachments.size()) return;
-// 	auto inputs = get_input_references();
-// 	auto colors = get_color_references();
-// 	auto resolves = get_resolve_references();
-// 	auto depth = get_depth_references();
-// 	VkSubpassDescription subpass {
-// 	    flags,
-// 	    bind_point,
-// 	    (uint32_t)inputs.size(),
-// 	    inputs.empty() ? nullptr : inputs.data(),
-// 	    (uint32_t)colors.size(),
-// 	    colors.empty() ? nullptr : colors.data(),
-// 	    resolves.empty() ? nullptr : resolves.data(),
-// 	    depth.empty() ? nullptr : depth.data(),
-// 	    (uint32_t)preserve_attachments.size(),
-// 	    preserve_attachments.empty() ? nullptr : preserve_attachments.data(),
-// 	};
-//     }
-
-    std::optional<VkShaderModule> shader_module(VkDevice device, const char* path) {
-	std::ifstream file {path, std::ios::ate | std::ios::binary};
-	if(!file.is_open()) return std::nullopt;
-	size_t size = file.tellg();
-	std::vector<uint32_t> buffer (size / sizeof(uint32_t));
-	file.seekg(0);
-	file.read((char*)buffer.data(), size);
-	file.close();
-        VkShaderModuleCreateInfo info = {
-	    .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-	    .codeSize = size,
-	    .pCode = buffer.data(),
-        };
-        VkShaderModule shader;
-        if(vkCreateShaderModule(device, &info, NULL, &shader) != VK_SUCCESS) return std::nullopt;
-        return shader;
     }
 
     void GraphicsPipeline::add_shader(VkShaderModule& shader_module, VkShaderStageFlagBits stage) {
@@ -302,7 +384,7 @@ namespace vb::create {
     }
 
     void GraphicsPipeline::add_shader(const char* path, VkShaderStageFlagBits stage) {
-	auto module = shader_module(ctx->device, path);
+	auto module = create::shader_module(ctx->device, path);
 	add_shader(module.value(), stage);
     }
 
@@ -376,77 +458,6 @@ namespace vb::create {
     void GraphicsPipeline::clean() {
 	vkDestroyPipeline(ctx->device, pipeline.value(), nullptr);
 	vkDestroyPipelineLayout(ctx->device, layout.value(), nullptr);
-    }
-
-
-    VkCommandPool cmd_pool(VkDevice device, uint32_t queue_family_index,
-	    VkCommandPoolCreateFlags flags) {
-	VkCommandPoolCreateInfo info = {
-	    .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-    	    .flags = flags,
-    	    .queueFamilyIndex = queue_family_index,
-    	};
-	VkCommandPool pool;
-	VB_ASSERT(vkCreateCommandPool(device, &info, nullptr, &pool) == VK_SUCCESS);
-	return pool;
-    }
-
-    VkSemaphore semaphore(VkDevice device, VkSemaphoreCreateFlags flags) {
-        VkSemaphoreCreateInfo info = {
-	   .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
-    	   .flags = flags,
-           };
-        VkSemaphore semaphore;
-        VB_ASSERT(vkCreateSemaphore(device, &info, NULL, &semaphore) == VK_SUCCESS);
-        return semaphore;
-    }
-    
-    VkFence fence(VkDevice device, VkFenceCreateFlags flags) {
-        VkFenceCreateInfo info = {
-	    .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-	    .flags = flags,
-        };
-        VkFence fence;
-        VB_ASSERT(vkCreateFence(device, &info, NULL, &fence) == VK_SUCCESS);
-        return fence;
-    }
-
-    VkDescriptorSetLayout descriptor_set_layout(VkDevice device,
-	    std::vector<VkDescriptorSetLayoutBinding> bindings,
-	    VkShaderStageFlags stages,
-	    VkDescriptorSetLayoutCreateFlags flags,
-	    void* next) {
-	if(stages) for(auto& binding: bindings)
-	    binding.stageFlags |= stages;
-	VkDescriptorSetLayoutCreateInfo info = {
-	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-	    .pNext = next,
-	    .flags = flags,
-	    .bindingCount = (uint32_t)bindings.size(),
-	    .pBindings = bindings.data(),
-	};
-	VkDescriptorSetLayout set;
-	VB_ASSERT(vkCreateDescriptorSetLayout(device, &info, NULL, &set) == VK_SUCCESS);
-	return set;
-    }
-    
-    VkPipeline compute_pipeline(VkDevice device,
-	    VkPipelineLayout layout,
-	    VkShaderModule shader_module) {
-        VkPipelineShaderStageCreateInfo shader_info = {
-	   .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-    	   .stage = VK_SHADER_STAGE_COMPUTE_BIT,
-    	   .module = shader_module,
-    	   .pName = "main",
-        };
-        VkComputePipelineCreateInfo info = {
-	   .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-    	   .stage = shader_info,
-    	   .layout = layout,
-        };
-        VkPipeline pipeline;
-        VB_ASSERT(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &info, NULL, &pipeline) == VK_SUCCESS);
-        return pipeline;
     }
 }
 

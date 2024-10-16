@@ -18,8 +18,8 @@ struct PushConstants {
 struct Rectangle {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
-    vb::create::Buffer vertex_buffer;
-    vb::create::Buffer index_buffer;
+    vb::builder::Buffer vertex_buffer;
+    vb::builder::Buffer index_buffer;
     VkDeviceAddress vertex_buffer_address;
 
     Rectangle(vb::Context* context, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
@@ -40,7 +40,7 @@ struct Rectangle {
 		    | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
 	    VB_ASSERT(index_buffer.all_valid());
 
-	    auto staging_buffer = vb::create::Buffer{context};
+	    auto staging_buffer = vb::builder::Buffer{context};
     	    staging_buffer.create(vertices_size + indices_size,
 		    VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 	    VB_ASSERT(staging_buffer.all_valid());
@@ -90,7 +90,7 @@ int main(int argc, char** argv) {
     };
     Rectangle rectangle2 {vbc.get(), vertices2, indices};
 
-    auto graphics_pipeline = vb::create::GraphicsPipeline{vbc.get()};
+    auto graphics_pipeline = vb::builder::GraphicsPipeline{vbc.get()};
     graphics_pipeline.set_front_face(VK_FRONT_FACE_COUNTER_CLOCKWISE);
     graphics_pipeline.enable_depth_test();
 
@@ -98,7 +98,7 @@ int main(int argc, char** argv) {
     graphics_pipeline.add_shader("../shaders/triangle.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
     graphics_pipeline.add_push_constant(sizeof(PushConstants), VK_SHADER_STAGE_VERTEX_BIT);
 
-    auto depth_image = vb::create::Image(vbc.get());
+    auto depth_image = vb::builder::Image(vbc.get());
     depth_image.create({vbc->swapchain_extent.width, vbc->swapchain_extent.height, 1},
 	    VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
     VB_ASSERT(depth_image.all_valid());

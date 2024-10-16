@@ -10,7 +10,7 @@ int main(int argc, char** argv) {
 	.height = 600,
     };
     auto vbc = std::make_unique<vb::Context>(info);
-    auto graphics_pipeline = vb::create::GraphicsPipeline{vbc.get()};
+    auto graphics_pipeline = vb::builder::GraphicsPipeline{vbc.get()};
     graphics_pipeline.add_shader("../shaders/triangle.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
     graphics_pipeline.add_shader("../shaders/triangle.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 

@@ -31,7 +31,7 @@ int main(int argc, char** argv) {
     	{{-0.5f, 0.5f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}}
     };
     const size_t vertices_size = sizeof(Vertex) * vertices.size();
-    auto vertex_buffer = vb::create::Buffer{vbc.get()};
+    auto vertex_buffer = vb::builder::Buffer{vbc.get()};
     vertex_buffer.create(vertices_size,
 	    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
     VB_ASSERT(vertex_buffer.buffer.has_value() && vertex_buffer.allocation.has_value() && vertex_buffer.info.has_value());
@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
     auto buffer_address = vkGetBufferDeviceAddress(vbc->device, &address);
     auto push_constants = PushConstants{buffer_address};
 
-    auto staging_buffer = vb::create::Buffer{vbc.get()};
+    auto staging_buffer = vb::builder::Buffer{vbc.get()};
     staging_buffer.create(vertices_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
     VB_ASSERT(staging_buffer.buffer.has_value() && staging_buffer.allocation.has_value() && staging_buffer.info.has_value());
     memcpy(staging_buffer.info->pMappedData, vertices.data(), vertices_size);
@@ -52,7 +52,7 @@ int main(int argc, char** argv) {
     });
     staging_buffer.clean();
 
-    auto graphics_pipeline = vb::create::GraphicsPipeline{vbc.get()};
+    auto graphics_pipeline = vb::builder::GraphicsPipeline{vbc.get()};
     graphics_pipeline.add_shader("../shaders/triangle_buffered.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
     graphics_pipeline.add_shader("../shaders/triangle.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
     graphics_pipeline.add_push_constant(sizeof(PushConstants), VK_SHADER_STAGE_VERTEX_BIT);
