@@ -365,6 +365,7 @@ namespace vb::builder {
 	    vkCmdCopyBufferToImage(cmd, staging_buffer.buffer.value(), image.value(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
 	    sync::transtition_image(cmd, image.value(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	});
+	staging_buffer.clean();
     }
 
     void Image::clean() {
