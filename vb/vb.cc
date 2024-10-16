@@ -791,14 +791,9 @@ namespace vb {
 
     void Context::create_swapchain_image_views() {
 	swapchain_image_views.resize(swapchain_images.size());
-    	VkImageViewUsageCreateInfo usage_info = {
-    	    .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO,
-    	    .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-    	};
     	for(size_t i = 0; i < swapchain_images.size(); i++) {
     	    VkImageViewCreateInfo info = {
     	        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-    	        .pNext = &usage_info,
     	        .image = swapchain_images[i],
     	        .viewType = VK_IMAGE_VIEW_TYPE_2D,
     	        .format = swapchain_format,
