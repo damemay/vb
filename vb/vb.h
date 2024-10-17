@@ -125,10 +125,10 @@ namespace vb {
 	VkDebugUtilsMessengerEXT debug_messenger;
 #endif
 
-	Context(const Info& context_info);
+	[[nodiscard]] Context(const Info& context_info);
 	~Context();
 
-	const std::vector<const char*>& get_enabled_extensions() const { return requested_extensions; }
+	[[nodiscard]] const std::vector<const char*>& get_enabled_extensions() const { return requested_extensions; }
 
 	void create_swapchain_framebuffers(VkRenderPass render_pass, std::vector<VkImageView> attachments = {});
 	void destroy_swapchain_framebuffers();
@@ -136,8 +136,8 @@ namespace vb {
 
 	void submit_quick_command(std::function<void(VkCommandBuffer cmd)>&& fn);
 
-	inline Frame* get_current_frame() { return &frames[frame_index % max_frames]; }
-	inline std::optional<uint32_t> wait_on_image_reset_fence(Frame* frame) {
+	[[nodiscard]] inline Frame* get_current_frame() { return &frames[frame_index % max_frames]; }
+	[[nodiscard]] inline std::optional<uint32_t> wait_on_image_reset_fence(Frame* frame) {
 	    vkWaitForFences(device, 1, &frame->render_fence, VK_TRUE, UINT64_MAX);
 	    uint32_t image_index;
 	    VkResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, frame->image_available_semaphore, VK_NULL_HANDLE, &image_index);
@@ -164,9 +164,9 @@ namespace vb {
 	    void init_vma();
 	    void init_quick_cmd();
 #ifndef NDEBUG
-	    VkDebugUtilsMessengerCreateInfoEXT fill_debug_messenger_create_info();
+	    [[nodiscard]] VkDebugUtilsMessengerCreateInfoEXT fill_debug_messenger_create_info();
 	    void create_debug_messenger();
-	    bool test_for_validation_layers();
+	    [[nodiscard]] bool test_for_validation_layers();
 #endif
     };
 }
@@ -217,32 +217,31 @@ namespace vb::sync {
 }
 
 namespace vb::fill {
-    VkCommandBufferAllocateInfo cmd_buffer_allocate_info(VkCommandPool pool, uint32_t count = 1);
-
-    VkRenderingAttachmentInfo attachment_info(VkImageView image_view, VkClearValue* clear,
+    [[nodiscard]] VkCommandBufferAllocateInfo cmd_buffer_allocate_info(VkCommandPool pool, uint32_t count = 1);
+    [[nodiscard]] VkRenderingAttachmentInfo attachment_info(VkImageView image_view, VkClearValue* clear,
 	    VkImageLayout image_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-    VkRenderingAttachmentInfo depth_attachment_info(VkImageView image_view,
+    [[nodiscard]] VkRenderingAttachmentInfo depth_attachment_info(VkImageView image_view,
 	    VkImageLayout image_layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-    VkRenderingInfo rendering_info(VkExtent2D render_extent,
+    [[nodiscard]] VkRenderingInfo rendering_info(VkExtent2D render_extent,
 	    VkRenderingAttachmentInfo* color_attachment,
 	    VkRenderingAttachmentInfo* depth_attachment);
-    VkImageSubresourceRange image_subresource_range(VkImageAspectFlags aspect_mask);
+    [[nodiscard]] VkImageSubresourceRange image_subresource_range(VkImageAspectFlags aspect_mask);
 }
 
 namespace vb::create {
-    VkCommandPool cmd_pool(VkDevice device, uint32_t queue_family_index,
+    [[nodiscard]] VkCommandPool cmd_pool(VkDevice device, uint32_t queue_family_index,
 	    VkCommandPoolCreateFlags flags);
-    VkSemaphore semaphore(VkDevice device, VkSemaphoreCreateFlags flags = 0);
-    VkFence fence(VkDevice device, VkFenceCreateFlags flags = 0);
-    VkDescriptorSetLayout descriptor_set_layout(VkDevice device,
+    [[nodiscard]] VkSemaphore semaphore(VkDevice device, VkSemaphoreCreateFlags flags = 0);
+    [[nodiscard]] VkFence fence(VkDevice device, VkFenceCreateFlags flags = 0);
+    [[nodiscard]] VkDescriptorSetLayout descriptor_set_layout(VkDevice device,
 	    std::vector<VkDescriptorSetLayoutBinding> bindings,
 	    VkShaderStageFlags stages,
 	    VkDescriptorSetLayoutCreateFlags flags,
 	    void* next);
-    VkPipeline compute_pipeline(VkDevice device,
+    [[nodiscard]] VkPipeline compute_pipeline(VkDevice device,
 	    VkPipelineLayout layout,
 	    VkShaderModule shader_module);
-    std::optional<VkShaderModule> shader_module(VkDevice device, const char* path);
+    [[nodiscard]] std::optional<VkShaderModule> shader_module(VkDevice device, const char* path);
 }
 
 namespace vb::builder {
@@ -253,9 +252,9 @@ namespace vb::builder {
 	    float ratio;
 	};
 
-	Descriptor(Context* context): ContextDependant{context} {}
+	[[nodiscard]] Descriptor(Context* context): ContextDependant{context} {}
 	void create(std::span<Ratio> pool_ratios, uint32_t init_sets = 1000, VkDescriptorPoolCreateFlags flags = 0);
-	std::optional<VkDescriptorSet> allocate(VkDescriptorSetLayout layout, void* next = nullptr);
+	[[nodiscard]] std::optional<VkDescriptorSet> allocate(VkDescriptorSetLayout layout, void* next = nullptr);
 	void flush();
 	void clean();
 
@@ -275,7 +274,7 @@ namespace vb::builder {
 	std::optional<VmaAllocationInfo> info {std::nullopt};
 	bool all_valid() {return buffer.has_value() && allocation.has_value() && info.has_value();}
 
-	Buffer(Context* context): ContextDependant{context} {}
+	[[nodiscard]] Buffer(Context* context): ContextDependant{context} {}
 	void create(const size_t size, VkBufferCreateFlags usage, VmaMemoryUsage mem_usage);
 	void clean();
     };
@@ -288,7 +287,7 @@ namespace vb::builder {
 
 	VkExtent3D extent;
 	VkFormat format;
-	Image(Context* context): ContextDependant{context} {}
+	[[nodiscard]] Image(Context* context): ContextDependant{context} {}
 	void create(VkExtent3D extent, VkFormat format = VK_FORMAT_R8G8B8A8_SRGB,
 		VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT  | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 		bool mipmap = false);
@@ -331,7 +330,7 @@ namespace vb::builder {
 	    };
 
 	public:
-	    GraphicsPipeline(Context* context): ContextDependant{context} {}
+	    [[nodiscard]] GraphicsPipeline(Context* context): ContextDependant{context} {}
 
 	    void add_shader(VkShaderModule& shader_module, VkShaderStageFlagBits stage);
 	    void add_shader(const char* path, VkShaderStageFlagBits stage);
