@@ -171,46 +171,6 @@ namespace vb {
     };
 }
 
-namespace vb::render {
-    inline void begin_reset_command_buffer(VkCommandBuffer cmd) {
-	vkResetCommandBuffer(cmd, 0);
-	VkCommandBufferBeginInfo begin {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-	VB_ASSERT(vkBeginCommandBuffer(cmd, &begin) == VK_SUCCESS);
-    }
-
-    inline void end_command_buffer(VkCommandBuffer cmd) {VB_ASSERT(vkEndCommandBuffer(cmd) == VK_SUCCESS);}
-
-    inline void submit_queue(VkQueue queue, VkFence fence,
-	    std::vector<VkCommandBuffer> buffers, std::vector<VkSemaphore> wait_semaphores,
-	    std::vector<VkSemaphore> signal_semaphores, std::vector<VkPipelineStageFlags> wait_destination_stage) {
-	VkPipelineStageFlags wait[1] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-	VkSubmitInfo submit = {
-	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-	    .waitSemaphoreCount = (uint32_t)wait_semaphores.size(),
-	    .pWaitSemaphores = wait_semaphores.data(),
-	    .pWaitDstStageMask = wait_destination_stage.data(),
-	    .commandBufferCount = (uint32_t)buffers.size(),
-	    .pCommandBuffers = buffers.data(),
-	    .signalSemaphoreCount = (uint32_t)signal_semaphores.size(),
-	    .pSignalSemaphores = signal_semaphores.data(),
-	};
-	VB_ASSERT(vkQueueSubmit(queue, 1, &submit, fence) == VK_SUCCESS);
-    }
-
-    inline void present_queue(VkQueue queue, VkSwapchainKHR* swapchain, std::vector<VkSemaphore> wait_semaphores, 
-	    uint32_t* index) {
-	VkPresentInfoKHR present = {
-	    .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-	    .waitSemaphoreCount = (uint32_t)wait_semaphores.size(),
-	    .pWaitSemaphores = wait_semaphores.data(),
-	    .swapchainCount = 1,
-	    .pSwapchains = swapchain,
-	    .pImageIndices = index,
-	};
-	vkQueuePresentKHR(queue, &present);
-    }
-}
-
 namespace vb::sync {
     void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
     void transition_image2(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);

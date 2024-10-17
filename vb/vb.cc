@@ -548,8 +548,13 @@ namespace vb {
 	};
 	VB_ASSERT(vkBeginCommandBuffer(quick_command_info.cmd_buffer, &begin) == VK_SUCCESS);
 	fn(quick_command_info.cmd_buffer);
-	render::end_command_buffer(quick_command_info.cmd_buffer);
-	render::submit_queue(queues_info.graphics_queue, quick_command_info.fence, {quick_command_info.cmd_buffer}, {}, {}, {});
+	VB_ASSERT(vkEndCommandBuffer(quick_command_info.cmd_buffer) == VK_SUCCESS);
+ 	VkSubmitInfo submit = {
+ 	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+ 	    .commandBufferCount = 1,
+ 	    .pCommandBuffers = &quick_command_info.cmd_buffer,
+ 	};
+ 	VB_ASSERT(vkQueueSubmit(queues_info.graphics_queue, 1, &submit, quick_command_info.fence) == VK_SUCCESS);
 	vkWaitForFences(device, 1, &quick_command_info.fence, 1, UINT64_MAX);
     }
 

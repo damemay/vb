@@ -112,8 +112,9 @@ int main(int argc, char** argv) {
 	    image_index = image.value();
 	}
 
-
-	vb::render::begin_reset_command_buffer(frame->cmd_buffer);
+ 	vkResetCommandBuffer(frame->cmd_buffer, 0);
+ 	VkCommandBufferBeginInfo begin {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+ 	VB_ASSERT(vkBeginCommandBuffer(frame->cmd_buffer, &begin) == VK_SUCCESS);
 
 	VkClearValue color {{{0.0f, 0.0f, 0.0f, 1.0f}}};
 	VkRenderPassBeginInfo render_begin {
@@ -135,14 +136,29 @@ int main(int argc, char** argv) {
 	vkCmdDraw(frame->cmd_buffer, 3, 1, 0, 0);
 	vkCmdEndRenderPass(frame->cmd_buffer);
 
-	vb::render::end_command_buffer(frame->cmd_buffer);
-
-	vb::render::submit_queue(vbc->queues_info.graphics_queue, frame->render_fence,
-		{frame->cmd_buffer}, {frame->image_available_semaphore}, {frame->finish_render_semaphore}, 
-		{VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT});
-
-	vb::render::present_queue(vbc->queues_info.graphics_queue, &vbc->swapchain,
-		{frame->finish_render_semaphore}, &image_index);
+	VB_ASSERT(vkEndCommandBuffer(frame->cmd_buffer) == VK_SUCCESS);
+ 	VkPipelineStageFlags wait[1] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+ 	VkSubmitInfo submit = {
+ 	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+ 	    .waitSemaphoreCount = 1,
+ 	    .pWaitSemaphores = &frame->image_available_semaphore,
+ 	    .pWaitDstStageMask = wait,
+ 	    .commandBufferCount = 1,
+ 	    .pCommandBuffers = &frame->cmd_buffer,
+ 	    .signalSemaphoreCount = 1,
+ 	    .pSignalSemaphores = &frame->finish_render_semaphore,
+ 	};
+ 	VB_ASSERT(vkQueueSubmit(vbc->queues_info.graphics_queue, 1, &submit, frame->render_fence) == VK_SUCCESS);
+ 
+ 	VkPresentInfoKHR present = {
+ 	    .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+ 	    .waitSemaphoreCount = 1,
+ 	    .pWaitSemaphores = &frame->finish_render_semaphore,
+ 	    .swapchainCount = 1,
+ 	    .pSwapchains = &vbc->swapchain,
+ 	    .pImageIndices = &image_index,
+ 	};
+ 	vkQueuePresentKHR(vbc->queues_info.graphics_queue, &present);
 
 	vbc->frame_index++;
     }
