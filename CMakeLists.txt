@@ -35,19 +35,12 @@ add_library(${PROJECT_NAME}
 )
 
 if(SAMPLE)
-    #add_library(IMGUI
-    #    ext/imgui/imgui.cpp
-    #    ext/imgui/imgui_demo.cpp
-    #    ext/imgui/imgui_draw.cpp
-    #    ext/imgui/imgui_tables.cpp
-    #    ext/imgui/imgui_widgets.cpp
-    #    ext/imgui/backends/imgui_impl_sdl3.cpp
-    #    ext/imgui/backends/imgui_impl_vulkan.cpp
-    #)
     add_library(VMA ext/vma.cc)
     add_library(STB ext/stb.cc)
-    file(GLOB files "samples/*.cc")
-    foreach(file ${files})
+    set(WORKING_SAMPLES 
+	samples/imageless_framebuffer.cc
+    )
+    foreach(file ${WORKING_SAMPLES})
         get_filename_component(sample ${file} NAME_WLE)
         set(SAMPLE_BINARY ${sample})
         add_executable(${SAMPLE_BINARY} ${file})
