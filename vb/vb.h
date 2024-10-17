@@ -108,7 +108,6 @@ namespace vb {
 	VkExtent2D swapchain_extent;
 	std::vector<VkImage> swapchain_images;
 	std::vector<VkImageView> swapchain_image_views;
-	std::vector<VkFramebuffer> swapchain_framebuffers;
 
 	float render_aspect_ratio {0.0f};
 
@@ -130,8 +129,6 @@ namespace vb {
 
 	[[nodiscard]] const std::vector<const char*>& get_enabled_extensions() const { return requested_extensions; }
 
-	void create_swapchain_framebuffers(VkRenderPass render_pass, std::vector<VkImageView> attachments = {});
-	void destroy_swapchain_framebuffers();
 	void recreate_swapchain(VkRenderPass render_pass);
 
 	void submit_quick_command(std::function<void(VkCommandBuffer cmd)>&& fn);

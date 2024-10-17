@@ -816,30 +816,7 @@ namespace vb {
     	}
     }
 
-    void Context::create_swapchain_framebuffers(VkRenderPass render_pass, std::vector<VkImageView> attachments) {
-	swapchain_framebuffers.resize(swapchain_image_views.size());
-	for(size_t i = 0; i < swapchain_framebuffers.size(); i++) {
-	    std::vector<VkImageView> internal_attachments {swapchain_image_views[i]};
-	    if(!attachments.empty()) internal_attachments.insert(internal_attachments.end(), attachments.begin(), attachments.end());
-	    VkFramebufferCreateInfo info = {
-		.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-		.renderPass = render_pass,
-		.attachmentCount = (uint32_t)internal_attachments.size(),
-		.pAttachments = internal_attachments.data(),
-		.width = swapchain_extent.width,
-		.height = swapchain_extent.height,
-		.layers = 1,
-	    };
-	    VB_ASSERT(vkCreateFramebuffer(device, &info, nullptr, &swapchain_framebuffers[i]) == VK_SUCCESS);
-	}
-    }
-
-    void Context::destroy_swapchain_framebuffers() {
-	for(auto framebuffer: swapchain_framebuffers) vkDestroyFramebuffer(device, framebuffer, nullptr);
-    }
-
     void Context::destroy_swapchain() {
-	destroy_swapchain_framebuffers();
 	for(auto& image_view : swapchain_image_views)
 	    vkDestroyImageView(device, image_view, nullptr);
 	vkDestroySwapchainKHR(device, swapchain, nullptr);
@@ -852,7 +829,6 @@ namespace vb {
 	SDL_GetWindowSize(window, &w, &h);
 	create_swapchain(w, h);
 	create_swapchain_image_views();
-	create_swapchain_framebuffers(render_pass);
 	resize = false;
     }
 
