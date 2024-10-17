@@ -790,6 +790,8 @@ namespace vb {
     	vkGetSwapchainImagesKHR(device, swapchain, &image_count, swapchain_images.data());
     	swapchain_format = format.format;
     	swapchain_extent = extent;
+	swapchain_support_data = {format, present_mode, surface_capabilities, image_count,
+	    indices.size() > 1 ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE, indices};
 	// render_extent.width = std::min(info.width, extent.width);
 	// render_extent.height = std::min(info.height, (uint32_t)(render_aspect_ratio*(float)extent.width));
     }
@@ -822,12 +824,44 @@ namespace vb {
 	vkDestroySwapchainKHR(device, swapchain, nullptr);
     }
 
-    void Context::recreate_swapchain(VkRenderPass render_pass) {
+    void Context::recreate_swapchain(std::function<void(uint32_t,uint32_t)>&& call_before_swapchain_create) {
 	vkDeviceWaitIdle(device);
-	destroy_swapchain();
 	int w,h;
 	SDL_GetWindowSize(window, &w, &h);
-	create_swapchain(w, h);
+	if(call_before_swapchain_create) call_before_swapchain_create(w,h);
+    	if(swapchain_support_data.surface_capabilities.currentExtent.width != UINT32_MAX) {
+    	    swapchain_extent = swapchain_support_data.surface_capabilities.currentExtent;
+    	} else {
+    	    swapchain_extent.width = std::clamp((uint32_t)w,
+		    swapchain_support_data.surface_capabilities.minImageExtent.width, 
+		    swapchain_support_data.surface_capabilities.maxImageExtent.width);
+    	    swapchain_extent.height = std::clamp((uint32_t)h,
+		    swapchain_support_data.surface_capabilities.minImageExtent.height,
+		    swapchain_support_data.surface_capabilities.maxImageExtent.height);
+    	}
+    	VkSwapchainCreateInfoKHR info = {
+    	    .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+    	    .surface = surface,
+    	    .minImageCount = swapchain_support_data.image_count,
+    	    .imageFormat = swapchain_support_data.format.format,
+    	    .imageColorSpace = swapchain_support_data.format.colorSpace,
+    	    .imageExtent = swapchain_extent,
+    	    .imageArrayLayers = 1,
+    	    .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+    	    .imageSharingMode = swapchain_support_data.image_sharing_mode,
+    	    .queueFamilyIndexCount = (uint32_t)swapchain_support_data.queue_family_indices.size(),
+    	    .pQueueFamilyIndices = swapchain_support_data.queue_family_indices.data(),
+    	    .preTransform = swapchain_support_data.surface_capabilities.currentTransform,
+    	    .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+    	    .presentMode = swapchain_support_data.present_mode,
+    	    .clipped = VK_TRUE,
+	    .oldSwapchain = swapchain,
+    	};
+	VkSwapchainKHR temp_swapchain;
+    	VB_ASSERT(vkCreateSwapchainKHR(device, &info, nullptr, &temp_swapchain) == VK_SUCCESS);
+	destroy_swapchain();
+	swapchain = temp_swapchain;
+    	vkGetSwapchainImagesKHR(device, swapchain, &swapchain_support_data.image_count, swapchain_images.data());
 	create_swapchain_image_views();
 	resize = false;
     }

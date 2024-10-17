@@ -277,7 +277,52 @@ int main(int argc, char** argv) {
 	    }
 	}
 
-	if(vbc->resize) vbc->recreate_swapchain(render_pass);
+	if(vbc->resize) {
+	    vbc->recreate_swapchain([&](uint32_t,uint32_t) {
+		depth_image.clean();
+		vkDestroyFramebuffer(vbc->device, framebuffer, nullptr);
+	    });
+	    depth_image.create({vbc->swapchain_extent.width, vbc->swapchain_extent.height, 1},
+		VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+	    VkFramebufferAttachmentImageInfo framebuffer_color_attachment_info {
+    	        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_ATTACHMENT_IMAGE_INFO,
+    	        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+    	        .width = vbc->swapchain_extent.width,
+    	        .height = vbc->swapchain_extent.height,
+    	        .layerCount = 1,
+    	        .viewFormatCount = 1,
+    	        .pViewFormats = &vbc->swapchain_format,
+    	    };
+
+    	    VkFramebufferAttachmentImageInfo framebuffer_depth_attachment_info {
+    	        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_ATTACHMENT_IMAGE_INFO,
+    	        .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+    	        .width = vbc->swapchain_extent.width,
+    	        .height = vbc->swapchain_extent.height,
+    	        .layerCount = 1,
+    	        .viewFormatCount = 1,
+    	        .pViewFormats = &depth_format,
+    	    };
+
+    	    VkFramebufferAttachmentImageInfo framebuffer_attachments[2] = {framebuffer_color_attachment_info, framebuffer_depth_attachment_info};
+
+    	    VkFramebufferAttachmentsCreateInfo framebuffer_attachments_info {
+    	        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_ATTACHMENTS_CREATE_INFO,
+    	        .attachmentImageInfoCount = 2,
+    	        .pAttachmentImageInfos = framebuffer_attachments,
+    	    };
+	    VkFramebufferCreateInfo framebuffer_info {
+    	    	.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+    	        .pNext = &framebuffer_attachments_info,
+    	        .flags = VK_FRAMEBUFFER_CREATE_IMAGELESS_BIT,
+    	        .renderPass = render_pass,
+    	        .attachmentCount = 2,
+    	        .width = vbc->swapchain_extent.width,
+    	        .height = vbc->swapchain_extent.height,
+    	        .layers = 1,
+    	    };
+    	    VB_ASSERT(vkCreateFramebuffer(vbc->device, &framebuffer_info, nullptr, &framebuffer) == VK_SUCCESS);
+	}
 
 	auto frame = vbc->get_current_frame();
 	uint32_t image_index = 0;

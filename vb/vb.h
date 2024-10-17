@@ -103,11 +103,21 @@ namespace vb {
 	QueuesInfo queues_info;
 	VkDevice device;
 	VkSurfaceKHR surface;
+
 	VkSwapchainKHR swapchain;
 	VkFormat swapchain_format;
 	VkExtent2D swapchain_extent;
 	std::vector<VkImage> swapchain_images;
 	std::vector<VkImageView> swapchain_image_views;
+	struct SwapchainSupportData {
+	    VkSurfaceFormatKHR format;
+	    VkPresentModeKHR present_mode;
+	    VkSurfaceCapabilitiesKHR surface_capabilities;
+	    uint32_t image_count;
+	    VkSharingMode image_sharing_mode;
+	    std::vector<uint32_t> queue_family_indices;
+	};
+	SwapchainSupportData swapchain_support_data;
 
 	float render_aspect_ratio {0.0f};
 
@@ -129,7 +139,7 @@ namespace vb {
 
 	[[nodiscard]] const std::vector<const char*>& get_enabled_extensions() const { return requested_extensions; }
 
-	void recreate_swapchain(VkRenderPass render_pass);
+	void recreate_swapchain(std::function<void(uint32_t,uint32_t)>&& call_before_swapchain_create = nullptr);
 
 	void submit_quick_command(std::function<void(VkCommandBuffer cmd)>&& fn);
 
