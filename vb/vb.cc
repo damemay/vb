@@ -81,35 +81,8 @@ namespace vb::fill {
 
 namespace vb::sync {
     void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout) {
-	VkPipelineStageFlags source;
-	VkPipelineStageFlags destination;
-	VkImageMemoryBarrier barrier = {
-	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-	    .oldLayout = old_layout,
-	    .newLayout = new_layout,
-	    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-	    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-	    .image = image,
-	    .subresourceRange = fill::image_subresource_range(new_layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT),
-	};
-	if(old_layout == VK_IMAGE_LAYOUT_UNDEFINED && new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-	    barrier.srcAccessMask = 0;
-	    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-	    source = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-	    destination = VK_PIPELINE_STAGE_TRANSFER_BIT;
-	}
-	if(old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-	    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-	    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-	    source = VK_PIPELINE_STAGE_TRANSFER_BIT;
-	    destination = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-	}
-	vkCmdPipelineBarrier(cmd, source, destination, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-    }
-
-    void transition_image2(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout) {
 	VkImageMemoryBarrier2 barrier = {
-	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
 	    .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
 	    .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
 	    .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
@@ -549,12 +522,16 @@ namespace vb {
 	VB_ASSERT(vkBeginCommandBuffer(quick_command_info.cmd_buffer, &begin) == VK_SUCCESS);
 	fn(quick_command_info.cmd_buffer);
 	VB_ASSERT(vkEndCommandBuffer(quick_command_info.cmd_buffer) == VK_SUCCESS);
- 	VkSubmitInfo submit = {
- 	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
- 	    .commandBufferCount = 1,
- 	    .pCommandBuffers = &quick_command_info.cmd_buffer,
+	VkCommandBufferSubmitInfo cmd_info = {
+	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+	    .commandBuffer = quick_command_info.cmd_buffer,
+	};
+ 	VkSubmitInfo2 submit = {
+ 	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+	    .commandBufferInfoCount = 1,
+	    .pCommandBufferInfos = &cmd_info,
  	};
- 	VB_ASSERT(vkQueueSubmit(queues_info.graphics_queue, 1, &submit, quick_command_info.fence) == VK_SUCCESS);
+ 	VB_ASSERT(vkQueueSubmit2(queues_info.graphics_queue, 1, &submit, quick_command_info.fence) == VK_SUCCESS);
 	vkWaitForFences(device, 1, &quick_command_info.fence, 1, UINT64_MAX);
     }
 

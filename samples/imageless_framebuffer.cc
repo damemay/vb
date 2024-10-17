@@ -379,18 +379,30 @@ int main(int argc, char** argv) {
 	vkCmdEndRenderPass(frame->cmd_buffer);
 
 	VB_ASSERT(vkEndCommandBuffer(frame->cmd_buffer) == VK_SUCCESS);
- 	VkPipelineStageFlags wait[1] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
- 	VkSubmitInfo submit = {
- 	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
- 	    .waitSemaphoreCount = 1,
- 	    .pWaitSemaphores = &frame->image_available_semaphore,
- 	    .pWaitDstStageMask = wait,
- 	    .commandBufferCount = 1,
- 	    .pCommandBuffers = &frame->cmd_buffer,
- 	    .signalSemaphoreCount = 1,
- 	    .pSignalSemaphores = &frame->finish_render_semaphore,
+	VkCommandBufferSubmitInfo cmd_info = {
+	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+	    .commandBuffer = frame->cmd_buffer,
+	};
+	VkSemaphoreSubmitInfo wait_info = {
+	    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+	    .semaphore = frame->image_available_semaphore,
+	    .stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+	};
+	VkSemaphoreSubmitInfo signal_info = {
+	    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+	    .semaphore = frame->finish_render_semaphore,
+	    .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
+	};
+ 	VkSubmitInfo2 submit = {
+ 	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+	    .waitSemaphoreInfoCount = 1,
+	    .pWaitSemaphoreInfos = &wait_info,
+	    .commandBufferInfoCount = 1,
+	    .pCommandBufferInfos = &cmd_info,
+	    .signalSemaphoreInfoCount = 1,
+	    .pSignalSemaphoreInfos = &signal_info,
  	};
- 	VB_ASSERT(vkQueueSubmit(vbc->queues_info.graphics_queue, 1, &submit, frame->render_fence) == VK_SUCCESS);
+ 	VB_ASSERT(vkQueueSubmit2(vbc->queues_info.graphics_queue, 1, &submit, frame->render_fence) == VK_SUCCESS);
  
  	VkPresentInfoKHR present = {
  	    .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,

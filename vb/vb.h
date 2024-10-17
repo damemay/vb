@@ -180,7 +180,6 @@ namespace vb {
 
 namespace vb::sync {
     void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
-    void transition_image2(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
 }
 
 namespace vb::fill {
