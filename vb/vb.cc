@@ -17,66 +17,6 @@ namespace vb::fill {
 	};
 	return info;
     }
-
-    VkPresentInfoKHR present_info(VkSwapchainKHR* swapchain, VkSemaphore* wait_semaphore, uint32_t* index) {
-	VkPresentInfoKHR info = {
-	    .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-	    .waitSemaphoreCount = 1,
-	    .pWaitSemaphores = wait_semaphore,
-	    .swapchainCount = 1,
-	    .pSwapchains = swapchain,
-	    .pImageIndices = index,
-	};
-	return info;
-    }
-
-    VkRenderingAttachmentInfo attachment_info(VkImageView image_view, VkClearValue* clear, VkImageLayout image_layout) {
-	VkRenderingAttachmentInfo info = {
-	    .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-	    .imageView = image_view,
-	    .imageLayout = image_layout,
-	    .loadOp = clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD,
-	    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-	};
-	if(clear) info.clearValue = *clear;
-	return info;
-    }
-
-    VkRenderingAttachmentInfo depth_attachment_info(VkImageView image_view,
-	    VkImageLayout image_layout) {
-	VkRenderingAttachmentInfo info = {
-	    .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-	    .imageView = image_view,
-	    .imageLayout = image_layout,
-	    .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-	    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-	};
-	info.clearValue.depthStencil.depth = 0.0f;
-	return info;
-    }
-
-    VkRenderingInfo rendering_info(VkExtent2D render_extent,
-	    VkRenderingAttachmentInfo* color_attachment,
-	    VkRenderingAttachmentInfo* depth_attachment) {
-	VkRenderingInfo info = {
-	    .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-	    .renderArea = {{0, 0}, render_extent},
-	    .layerCount = 1,
-	    .colorAttachmentCount = 1,
-	    .pColorAttachments = color_attachment,
-	    .pDepthAttachment = depth_attachment,
-	};
-	return info;
-    }
-
-    VkImageSubresourceRange image_subresource_range(VkImageAspectFlags aspect_mask) {
-	VkImageSubresourceRange range = {
-	    .aspectMask = aspect_mask,
-	    .levelCount = VK_REMAINING_MIP_LEVELS,
-	    .layerCount = VK_REMAINING_ARRAY_LAYERS,
-	};
-	return range;
-    }
 }
 
 namespace vb::sync {
@@ -92,7 +32,11 @@ namespace vb::sync {
 	    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 	    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 	    .image = image,
-	    .subresourceRange = fill::image_subresource_range(new_layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT),
+	    .subresourceRange = {
+		.aspectMask = new_layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT,
+		.levelCount = VK_REMAINING_MIP_LEVELS,
+		.layerCount = VK_REMAINING_ARRAY_LAYERS,
+	    },
 	};
 	VkDependencyInfo dependency = {
 	    .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
@@ -198,25 +142,6 @@ namespace vb::create {
 	VkDescriptorSetLayout set;
 	VB_ASSERT(vkCreateDescriptorSetLayout(device, &info, NULL, &set) == VK_SUCCESS);
 	return set;
-    }
-    
-    VkPipeline compute_pipeline(VkDevice device,
-	    VkPipelineLayout layout,
-	    VkShaderModule shader_module) {
-        VkPipelineShaderStageCreateInfo shader_info = {
-	   .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-    	   .stage = VK_SHADER_STAGE_COMPUTE_BIT,
-    	   .module = shader_module,
-    	   .pName = "main",
-        };
-        VkComputePipelineCreateInfo info = {
-	   .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-    	   .stage = shader_info,
-    	   .layout = layout,
-        };
-        VkPipeline pipeline;
-        VB_ASSERT(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &info, NULL, &pipeline) == VK_SUCCESS);
-        return pipeline;
     }
 }
 
@@ -578,10 +503,23 @@ namespace vb {
 	    }
 	}
 	if(validation_layers_support) extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	uint32_t available_implementation_api = 0;
+	uint32_t minor = 0;
+	if(vkGetInstanceProcAddr(NULL, "vkEnumerateInstanceVersion")) {
+	    VB_ASSERT(vkEnumerateInstanceVersion(&available_implementation_api) == VK_SUCCESS);
+	    VB_ASSERT(VK_API_VERSION_VARIANT(available_implementation_api) == 0);
+	    VB_ASSERT(VK_API_VERSION_MAJOR(available_implementation_api) == 1);
+	    minor = VK_API_VERSION_MINOR(available_implementation_api);
+	} else {
+	    available_implementation_api = VK_API_VERSION_1_0;
+	    minor = 0;
+	}
+	log(std::format("Detected implementation API version: 1.{}", minor));
+	VB_ASSERT(minor == 3);
 	VkApplicationInfo app = {
     	    .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
 	    .pApplicationName = info.title.c_str(),
-    	    .apiVersion = api_version,
+    	    .apiVersion = available_implementation_api,
 	};
 	VkInstanceCreateInfo info = {
 	    .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
@@ -599,6 +537,8 @@ namespace vb {
 	}
 #endif
 	VB_ASSERT(vkCreateInstance(&info, nullptr, &instance) == VK_SUCCESS);
+	available_implementation_api_version = available_implementation_api;
+	api_minor_version = minor;
     }
 
     void Context::pick_physical_device() {

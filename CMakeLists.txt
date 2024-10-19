@@ -24,6 +24,7 @@ find_package(glm REQUIRED)
 include_directories(
     vb/
     ext/
+    ext/tinyobjloader/
     ext/VulkanMemoryAllocator/include/
     ext/imgui/
     ext/imgui/backends/
@@ -37,11 +38,9 @@ add_library(${PROJECT_NAME}
 if(SAMPLE)
     add_library(VMA ext/vma.cc)
     add_library(STB ext/stb.cc)
+    add_library(TOL ext/tol.cc)
     set(WORKING_SAMPLES 
-	samples/imageless_framebuffer.cc
-	samples/dynamic_rendering.cc
 	samples/push_descriptors.cc
-	samples/descriptor_buffers.cc
 	samples/compute.cc
     )
     foreach(file ${WORKING_SAMPLES})
@@ -56,6 +55,7 @@ if(SAMPLE)
 	    glm::glm
 	    VMA
 	    STB
+	    TOL
     	    #IMGUI
 	    m
         )

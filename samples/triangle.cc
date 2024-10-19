@@ -42,9 +42,22 @@ int main(int argc, char** argv) {
     VB_ASSERT(vkCreateRenderPass(vbc->device, &render_pass_info, nullptr, &render_pass) == VK_SUCCESS);
 
     graphics_pipeline.create(render_pass, 0);
-    VB_ASSERT(graphics_pipeline.pipeline.value());
+    VB_ASSERT(graphics_pipeline.pipeline);
 
-    vbc->create_swapchain_framebuffers(render_pass);
+    VkFramebuffer framebuffers[vbc->swapchain_image_views.size()];
+    for(size_t i = 0; i < vbc->swapchain_image_views.size(); i++) {
+	VkImageView attachments[1] = {vbc->swapchain_image_views[i]};
+	VkFramebufferCreateInfo framebuffer_info {
+	    .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+    	    .renderPass = render_pass,
+    	    .attachmentCount = 1,
+	    .pAttachments = attachments,
+    	    .width = vbc->swapchain_extent.width,
+    	    .height = vbc->swapchain_extent.height,
+    	    .layers = 1,
+    	};
+    	VB_ASSERT(vkCreateFramebuffer(vbc->device, &framebuffer_info, nullptr, &framebuffers[i]) == VK_SUCCESS);
+    }
 
     bool running = true;
     SDL_Event event;
@@ -64,31 +77,27 @@ int main(int argc, char** argv) {
 	    }
 	}
 
-	if(vbc->resize) vbc->recreate_swapchain(render_pass);
-
 	auto frame = vbc->get_current_frame();
-	uint32_t image_index = 0;
-	{
-	    auto image = vbc->wait_on_image_reset_fence(frame);
-	    if(!image.has_value()) continue;
-	    image_index = image.value();
-	}
+	auto image = vbc->wait_on_image_reset_fence(frame);
+	if(!image.has_value()) continue;
+	uint32_t image_index = image.value();
 
  	vkResetCommandBuffer(frame->cmd_buffer, 0);
  	VkCommandBufferBeginInfo begin {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
  	VB_ASSERT(vkBeginCommandBuffer(frame->cmd_buffer, &begin) == VK_SUCCESS);
 
 	VkClearValue color {{{0.0f, 0.0f, 0.0f, 1.0f}}};
+	VB_ASSERT(framebuffers[image_index] != VK_NULL_HANDLE);
 	VkRenderPassBeginInfo render_begin {
 	    .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
 	    .renderPass = render_pass,
-	    .framebuffer = vbc->swapchain_framebuffers[image_index],
+	    .framebuffer = framebuffers[image_index],
 	    .renderArea = {{0,0}, vbc->swapchain_extent},
 	    .clearValueCount = 1,
 	    .pClearValues = &color,
 	};
 	vkCmdBeginRenderPass(frame->cmd_buffer, &render_begin, VK_SUBPASS_CONTENTS_INLINE);
-	vkCmdBindPipeline(frame->cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline.pipeline.value());
+	vkCmdBindPipeline(frame->cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline.pipeline);
 	VkViewport viewport {0.0f, 0.0f, (float)vbc->swapchain_extent.width, (float)vbc->swapchain_extent.height};
 	vkCmdSetViewport(frame->cmd_buffer, 0, 1, &viewport);
 	VkRect2D scissor {{0,0}, vbc->swapchain_extent};
@@ -126,4 +135,5 @@ int main(int argc, char** argv) {
 
     vkDestroyRenderPass(vbc->device, render_pass, nullptr);
     graphics_pipeline.clean();
+    for(size_t i=0; i<vbc->swapchain_image_views.size(); i++) vkDestroyFramebuffer(vbc->device, framebuffers[i], nullptr);
 }

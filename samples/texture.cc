@@ -34,7 +34,7 @@ struct Rectangle {
 	    VB_ASSERT(vertex_buffer.all_valid());
 	    VkBufferDeviceAddressInfo address = {
     	        .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-    	        .buffer = vertex_buffer.buffer.value(),
+    	        .buffer = vertex_buffer.buffer,
     	    };
     	    vertex_buffer_address = vkGetBufferDeviceAddress(context->device, &address);
 
@@ -47,14 +47,14 @@ struct Rectangle {
     	    staging_buffer.create(vertices_size + indices_size,
 		    VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 	    VB_ASSERT(staging_buffer.all_valid());
-    	    memcpy(staging_buffer.info->pMappedData, vertices.data(), vertices_size);
-    	    memcpy((char*)(staging_buffer.info->pMappedData)+vertices_size, indices.data(),
+    	    memcpy(staging_buffer.info.pMappedData, vertices.data(), vertices_size);
+    	    memcpy((char*)(staging_buffer.info.pMappedData)+vertices_size, indices.data(),
 		    indices_size);
     	    context->submit_quick_command([&](VkCommandBuffer cmd) {
     	        VkBufferCopy copy = { .size = vertices_size };
-    	        vkCmdCopyBuffer(cmd, staging_buffer.buffer.value(), vertex_buffer.buffer.value(), 1, &copy);
+    	        vkCmdCopyBuffer(cmd, staging_buffer.buffer, vertex_buffer.buffer, 1, &copy);
     	        VkBufferCopy copy2 = { .srcOffset = vertices_size, .size = indices_size };
-    	        vkCmdCopyBuffer(cmd, staging_buffer.buffer.value(), index_buffer.buffer.value(), 1, &copy2);
+    	        vkCmdCopyBuffer(cmd, staging_buffer.buffer, index_buffer.buffer, 1, &copy2);
     	    });
     	    staging_buffer.clean();
     }
@@ -136,16 +136,16 @@ int main(int argc, char** argv) {
     vb::builder::Descriptor::Ratio sizes[1] {{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2}};
     descriptor_builder.create(sizes);
     auto set = descriptor_builder.allocate(layout);
-    VB_ASSERT(set.has_value());
+    VB_ASSERT(set);
 
     VkDescriptorImageInfo image_info {
 	.sampler = sampler,
-	.imageView = texture.image_view.value(),
+	.imageView = texture.image_view,
 	.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
     };
     VkWriteDescriptorSet descriptor_write {
 	.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-	.dstSet = set.value(),
+	.dstSet = set,
 	.dstBinding = 0,
 	.dstArrayElement = 0,
 	.descriptorCount = 1,
@@ -216,7 +216,20 @@ int main(int argc, char** argv) {
     graphics_pipeline.create(render_pass, 0, {layout});
     VB_ASSERT(graphics_pipeline.all_valid());
 
-    vbc->create_swapchain_framebuffers(render_pass, {depth_image.image_view.value()});
+    VkFramebuffer framebuffers[vbc->swapchain_image_views.size()];
+    for(size_t i = 0; i < vbc->swapchain_image_views.size(); i++) {
+	VkImageView attachments[2] = {vbc->swapchain_image_views[i], depth_image.image_view};
+	VkFramebufferCreateInfo framebuffer_info {
+	    .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+    	    .renderPass = render_pass,
+    	    .attachmentCount = 2,
+	    .pAttachments = attachments,
+    	    .width = vbc->swapchain_extent.width,
+    	    .height = vbc->swapchain_extent.height,
+    	    .layers = 1,
+    	};
+    	VB_ASSERT(vkCreateFramebuffer(vbc->device, &framebuffer_info, nullptr, &framebuffers[i]) == VK_SUCCESS);
+    }
 
     bool running = true;
     SDL_Event event;
@@ -235,8 +248,7 @@ int main(int argc, char** argv) {
 		    break;
 	    }
 	}
-
-	if(vbc->resize) vbc->recreate_swapchain(render_pass);
+	// if(vbc->resize) vbc->recreate_swapchain(render_pass);
 
 	auto frame = vbc->get_current_frame();
 	uint32_t image_index = 0;
@@ -257,31 +269,31 @@ int main(int argc, char** argv) {
 	VkRenderPassBeginInfo render_begin {
 	    .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
 	    .renderPass = render_pass,
-	    .framebuffer = vbc->swapchain_framebuffers[image_index],
+	    .framebuffer = framebuffers[image_index],
 	    .renderArea = {{0,0}, vbc->swapchain_extent},
 	    .clearValueCount = 2,
 	    .pClearValues = color,
 	};
 	vkCmdBeginRenderPass(frame->cmd_buffer, &render_begin, VK_SUBPASS_CONTENTS_INLINE);
-	vkCmdBindPipeline(frame->cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline.pipeline.value());
+	vkCmdBindPipeline(frame->cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline.pipeline);
 	VkViewport viewport {0.0f, 0.0f, (float)vbc->swapchain_extent.width, (float)vbc->swapchain_extent.height};
 	vkCmdSetViewport(frame->cmd_buffer, 0, 1, &viewport);
 	VkRect2D scissor {{0,0}, vbc->swapchain_extent};
 	vkCmdSetScissor(frame->cmd_buffer, 0, 1, &scissor);
 
-	vkCmdBindDescriptorSets(frame->cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline.layout.value(), 0, 1, &set.value(), 0, nullptr);
+	vkCmdBindDescriptorSets(frame->cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline.layout, 0, 1, &set, 0, nullptr);
 	// glm::mat4 model = glm::mat4(1);
 	// model = glm::rotate(model, glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 	glm::mat4 view = glm::lookAt(glm::vec3(2.0f), glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 	glm::mat4 proj = glm::perspective(glm::radians(45.0f), (float)vbc->swapchain_extent.width/(float)vbc->swapchain_extent.height, 0.1f, 100.0f);
 	proj[1][1] *= -1;
 	auto push_constants = PushConstants{proj * view, rectangle.vertex_buffer_address};
-	vkCmdPushConstants(frame->cmd_buffer, graphics_pipeline.layout.value(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &push_constants);
-	vkCmdBindIndexBuffer(frame->cmd_buffer, rectangle.index_buffer.buffer.value(), 0, VK_INDEX_TYPE_UINT32);
+	vkCmdPushConstants(frame->cmd_buffer, graphics_pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &push_constants);
+	vkCmdBindIndexBuffer(frame->cmd_buffer, rectangle.index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 	vkCmdDrawIndexed(frame->cmd_buffer, (uint32_t)indices.size(), 2, 0, 0, 0);
 	push_constants = PushConstants{proj * view, rectangle2.vertex_buffer_address};
-	vkCmdPushConstants(frame->cmd_buffer, graphics_pipeline.layout.value(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &push_constants);
-	vkCmdBindIndexBuffer(frame->cmd_buffer, rectangle2.index_buffer.buffer.value(), 0, VK_INDEX_TYPE_UINT32);
+	vkCmdPushConstants(frame->cmd_buffer, graphics_pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &push_constants);
+	vkCmdBindIndexBuffer(frame->cmd_buffer, rectangle2.index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 	vkCmdDrawIndexed(frame->cmd_buffer, (uint32_t)indices.size(), 2, 0, 0, 0);
 	vkCmdEndRenderPass(frame->cmd_buffer);
 
@@ -324,4 +336,5 @@ int main(int argc, char** argv) {
     vkDestroyDescriptorSetLayout(vbc->device, layout, nullptr);
     descriptor_builder.clean();
     depth_image.clean();
+    for(size_t i=0; i<vbc->swapchain_image_views.size(); i++) vkDestroyFramebuffer(vbc->device, framebuffers[i], nullptr);
 }

@@ -30,7 +30,7 @@ namespace vb {
     };
 
     static inline void log(const std::string& buf) {
-	fprintf(stderr, "vor: %s\n", buf.c_str());
+	fprintf(stderr, "vb: %s\n", buf.c_str());
     }
 
     struct DeletionQueue {
@@ -71,8 +71,6 @@ namespace vb {
     };
 
     struct Context {
-	constexpr static uint32_t api_version = VK_API_VERSION_1_3;
-
 	struct Info {
 	    std::string title;
 	    uint32_t width;
@@ -93,6 +91,8 @@ namespace vb {
 	    VkSurfaceFormatKHR surface_format = {VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
 	    VkPresentModeKHR present_mode = VK_PRESENT_MODE_MAILBOX_KHR;
     	};
+	uint32_t available_implementation_api_version {0};
+    	uint32_t api_minor_version = 0;
 
 	Info info;
 	SDL_Window* window {nullptr};
@@ -186,14 +186,6 @@ namespace vb::sync {
 
 namespace vb::fill {
     [[nodiscard]] VkCommandBufferAllocateInfo cmd_buffer_allocate_info(VkCommandPool pool, uint32_t count = 1);
-    [[nodiscard]] VkRenderingAttachmentInfo attachment_info(VkImageView image_view, VkClearValue* clear,
-	    VkImageLayout image_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-    [[nodiscard]] VkRenderingAttachmentInfo depth_attachment_info(VkImageView image_view,
-	    VkImageLayout image_layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-    [[nodiscard]] VkRenderingInfo rendering_info(VkExtent2D render_extent,
-	    VkRenderingAttachmentInfo* color_attachment,
-	    VkRenderingAttachmentInfo* depth_attachment);
-    [[nodiscard]] VkImageSubresourceRange image_subresource_range(VkImageAspectFlags aspect_mask);
 }
 
 namespace vb::create {
@@ -206,9 +198,6 @@ namespace vb::create {
 	    VkShaderStageFlags stages,
 	    VkDescriptorSetLayoutCreateFlags flags,
 	    void* next);
-    [[nodiscard]] VkPipeline compute_pipeline(VkDevice device,
-	    VkPipelineLayout layout,
-	    VkShaderModule shader_module);
     [[nodiscard]] VkShaderModule shader_module(VkDevice device, const char* path);
 }
 
