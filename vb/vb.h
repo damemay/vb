@@ -1,18 +1,11 @@
 #pragma once
 
-#define GLM_FORCE_RADIANS
-#define GLM_ENABLE_EXPERIMENTAL
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-
 #include <string>
 #include <functional>
-#include <deque>
 #include <optional>
 #include <span>
+#include <assert.h>
 #include <vulkan/vulkan_core.h>
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtx/transform.hpp>
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
@@ -25,50 +18,8 @@
 
 namespace vb {
     struct Context;
-    struct ContextDependant {
-	Context* ctx;
-    };
-
-    static inline void log(const std::string& buf) {
-	fprintf(stderr, "vb: %s\n", buf.c_str());
-    }
-
-    struct DeletionQueue {
-	std::deque<std::function<void()>> deletors;
-	void push(std::function<void()>&& fn) { deletors.push_back(fn); }
-	void flush() {
-	    for(auto i = deletors.rbegin(); i != deletors.rend(); i++)
-		(*i)();
-	    deletors.clear();
-	}
-    };
-}
-
-namespace vb {
-    struct QuickCommand {
-	VkCommandPool cmd_pool;
-	VkCommandBuffer cmd_buffer;
-	VkFence fence;
-    };
-
-    struct Frame {
-	VkCommandPool cmd_pool;
-	VkCommandBuffer cmd_buffer;
-
-	VkSemaphore image_available_semaphore;
-	VkSemaphore finish_render_semaphore;
-	VkFence render_fence;
-    };
-
-    struct QueuesInfo {
-	VkQueue graphics_queue;
-    	VkQueue compute_queue;
-    	VkQueue present_queue;
-
-    	uint32_t graphics_index;
-    	uint32_t compute_index;
-    	uint32_t present_index;
-    };
+    struct ContextDependant {Context* ctx;};
+    static inline void log(const std::string& buf) {fprintf(stderr, "vb: %s\n", buf.c_str());}
 
     struct Context {
 	struct Info {
@@ -100,9 +51,19 @@ namespace vb {
 	VmaAllocator vma_allocator;
 	VkInstance instance;
 	VkPhysicalDevice physical_device {VK_NULL_HANDLE};
-	QueuesInfo queues_info;
 	VkDevice device;
 	VkSurfaceKHR surface;
+
+	struct QueuesInfo {
+    	    VkQueue graphics_queue;
+    		VkQueue compute_queue;
+    		VkQueue present_queue;
+
+    		uint32_t graphics_index;
+    		uint32_t compute_index;
+    		uint32_t present_index;
+    	};
+	QueuesInfo queues_info;
 
 	VkSwapchainKHR swapchain;
 	VkFormat swapchain_format;
@@ -119,45 +80,35 @@ namespace vb {
 	};
 	SwapchainSupportData swapchain_support_data;
 
-	float render_aspect_ratio {0.0f};
-
-	bool resize {false};
-	static constexpr uint8_t max_frames {2};
-	Frame frames[max_frames];
-	uint8_t frame_index {0};
-
-	QuickCommand quick_command_info;
-
     	static constexpr const char* validation_layer_name[1] {"VK_LAYER_KHRONOS_validation"};
 	bool validation_layers_support {false};
 #ifndef NDEBUG
 	VkDebugUtilsMessengerEXT debug_messenger;
 #endif
 
+	std::function<void()> resize_callback {nullptr};
+
 	[[nodiscard]] Context(const Info& context_info);
 	~Context();
+
+	void set_resize_callback(std::function<void()>&& fn) { resize_callback = fn; }
 
 	[[nodiscard]] const std::vector<std::string>& get_enabled_extensions() const { return requested_extensions; }
 	[[nodiscard]] const std::vector<std::string>& get_available_extensions() const { return available_extensions; }
 
 	void recreate_swapchain(std::function<void(uint32_t,uint32_t)>&& call_before_swapchain_create = nullptr);
 
-	void submit_quick_command(std::function<void(VkCommandBuffer cmd)>&& fn);
-
-	[[nodiscard]] inline Frame* get_current_frame() { return &frames[frame_index % max_frames]; }
-	[[nodiscard]] inline std::optional<uint32_t> wait_on_image_reset_fence(Frame* frame) {
-	    vkWaitForFences(device, 1, &frame->render_fence, VK_TRUE, UINT64_MAX);
+	[[nodiscard]] std::optional<uint32_t> acquire_next_image(VkSemaphore signal_semaphore) {
 	    uint32_t image_index;
-	    VkResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, frame->image_available_semaphore, VK_NULL_HANDLE, &image_index);
+	    VkResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, signal_semaphore, VK_NULL_HANDLE, &image_index);
 	    if(result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
-		resize = true;
+		resize_callback();
 		return std::nullopt;
 	    }
-	    vkResetFences(device, 1, &frame->render_fence);
 	    return image_index;
 	}
 
-	private:
+	protected:
 	    std::vector<std::string> available_extensions;
 	    std::vector<std::string> requested_extensions;
 
@@ -168,9 +119,7 @@ namespace vb {
 	    void create_swapchain(uint32_t width, uint32_t height);
 	    void create_swapchain_image_views();
 	    void destroy_swapchain();
-	    void create_frames();
 	    void init_vma();
-	    void init_quick_cmd();
 #ifndef NDEBUG
 	    [[nodiscard]] VkDebugUtilsMessengerCreateInfoEXT fill_debug_messenger_create_info();
 	    void create_debug_messenger();
@@ -182,10 +131,6 @@ namespace vb {
 namespace vb::sync {
     void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
     void blit_image(VkCommandBuffer cmd, VkImage source, VkImage dest, VkExtent3D src_extent, VkExtent3D dst_extent, VkImageAspectFlags aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT);
-}
-
-namespace vb::fill {
-    [[nodiscard]] VkCommandBufferAllocateInfo cmd_buffer_allocate_info(VkCommandPool pool, uint32_t count = 1);
 }
 
 namespace vb::create {
@@ -203,6 +148,21 @@ namespace vb::create {
 
 namespace vb::builder {
     struct OptionalValidator {virtual bool all_valid() = 0;};
+
+    struct CommandPool : public ContextDependant, public OptionalValidator {
+	VkCommandPool pool {VK_NULL_HANDLE};
+	VkFence fence {VK_NULL_HANDLE};
+	VkQueue queue {VK_NULL_HANDLE};
+	uint32_t queue_index {0};
+	bool all_valid() {return pool&&fence&&queue;}
+
+	[[nodiscard]] CommandPool(Context* context): ContextDependant{context} {}
+	void create(VkQueue queue, uint32_t queue_index, VkCommandPoolCreateFlags flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+	[[nodiscard]] VkCommandBuffer allocate();
+	void submit_command_buffer_to_queue(VkCommandBuffer cmd_buffer, std::function<void(VkCommandBuffer cmd)>&& fn);
+	void clean();
+    };
+
     struct Descriptor : public ContextDependant {
 	struct Ratio {
 	    VkDescriptorType type;
@@ -248,7 +208,7 @@ namespace vb::builder {
 	void create(VkExtent3D extent, VkFormat format = VK_FORMAT_R8G8B8A8_SRGB,
 		VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT  | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 		bool mipmap = false);
-	void create(void* data, VkExtent3D extent, VkFormat format = VK_FORMAT_R8G8B8A8_SRGB,
+	void create(CommandPool pool, void* data, VkExtent3D extent, VkFormat format = VK_FORMAT_R8G8B8A8_SRGB,
 		VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 		bool mipmap = false);
 	void clean();

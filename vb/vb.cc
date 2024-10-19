@@ -1,23 +1,11 @@
-#include <glm/vector_relational.hpp>
 #include <set>
 #include <format>
 #include <fstream>
 #include <SDL3/SDL_vulkan.h>
 #include <unistd.h>
 #include <vulkan/vulkan_core.h>
+#include <math.h>
 #include <vb.h>
-
-namespace vb::fill {
-    VkCommandBufferAllocateInfo cmd_buffer_allocate_info(VkCommandPool pool, uint32_t count) {
-	VkCommandBufferAllocateInfo info = {
-	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-	    .commandPool = pool,
-	    .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-	    .commandBufferCount = count,
-	};
-	return info;
-    }
-}
 
 namespace vb::sync {
     void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout) {
@@ -146,6 +134,55 @@ namespace vb::create {
 }
 
 namespace vb::builder {
+    void CommandPool::create(VkQueue queue, uint32_t queue_index, VkCommandPoolCreateFlags flags) {
+	this->queue = queue;
+	this->queue_index = queue_index;
+	pool = create::cmd_pool(ctx->device, queue_index, flags);
+	fence = create::fence(ctx->device);
+    }
+
+    [[nodiscard]] VkCommandBuffer CommandPool::allocate() {
+	VkCommandBufferAllocateInfo info = {
+	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+	    .commandPool = pool,
+	    .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+	    .commandBufferCount = 1,
+	};
+	VkCommandBuffer buffer {VK_NULL_HANDLE};
+	vkAllocateCommandBuffers(ctx->device, &info, &buffer);
+	return buffer;
+    }
+
+    void CommandPool::submit_command_buffer_to_queue(VkCommandBuffer cmd_buffer, std::function<void(VkCommandBuffer cmd)>&& fn) {
+	vkResetFences(ctx->device, 1, &fence);
+	vkResetCommandBuffer(cmd_buffer, 0);
+	VkCommandBufferBeginInfo begin = {
+	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+	    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+	};
+	VB_ASSERT(vkBeginCommandBuffer(cmd_buffer, &begin) == VK_SUCCESS);
+	fn(cmd_buffer);
+	VB_ASSERT(vkEndCommandBuffer(cmd_buffer) == VK_SUCCESS);
+	VkCommandBufferSubmitInfo cmd_info = {
+	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+	    .commandBuffer = cmd_buffer,
+	};
+ 	VkSubmitInfo2 submit = {
+ 	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+	    .commandBufferInfoCount = 1,
+	    .pCommandBufferInfos = &cmd_info,
+ 	};
+ 	VB_ASSERT(vkQueueSubmit2(queue, 1, &submit, fence) == VK_SUCCESS);
+	vkWaitForFences(ctx->device, 1, &fence, 1, UINT64_MAX);
+    }
+
+    void CommandPool::clean() {
+	vkDestroyCommandPool(ctx->device, pool, nullptr);
+	vkDestroyFence(ctx->device, fence, nullptr);
+	pool = VK_NULL_HANDLE;
+	fence = VK_NULL_HANDLE;
+    }
+
     void Descriptor::create(std::span<Ratio> pool_ratios, uint32_t init_sets, VkDescriptorPoolCreateFlags flags) {
 	ratios.clear();
 	for(auto ratio: pool_ratios) ratios.push_back(ratio);
@@ -241,6 +278,8 @@ namespace vb::builder {
 
     void Buffer::clean() {
 	vmaDestroyBuffer(ctx->vma_allocator, buffer, allocation);
+	buffer = VK_NULL_HANDLE;
+	allocation = VK_NULL_HANDLE;
     }
 
     void Image::create(VkExtent3D extent, VkFormat format, VkImageUsageFlags usage, bool mipmap) {
@@ -281,14 +320,16 @@ namespace vb::builder {
 	if(vkCreateImageView(ctx->device, &info, nullptr, &image_view) != VK_SUCCESS) return;
     }
 
-    void Image::create(void* data, VkExtent3D extent, VkFormat format, VkImageUsageFlags usage, bool mipmap) {
+    void Image::create(CommandPool pool, void* data, VkExtent3D extent, VkFormat format, VkImageUsageFlags usage, bool mipmap) {
 	size_t data_size = extent.depth * extent.width * extent.height * 4;
 	auto staging_buffer = Buffer(ctx);
 	staging_buffer.create(data_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 	memcpy(staging_buffer.info.pMappedData, data, data_size);
 	create(extent, format, usage, mipmap);
 	if(!all_valid()) return;
-	ctx->submit_quick_command([&](VkCommandBuffer cmd) {
+	auto cmd = pool.allocate();
+	if(!cmd) return;
+	pool.submit_command_buffer_to_queue(cmd, [&](VkCommandBuffer cmd) {
 	    sync::transition_image(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 	    VkBufferImageCopy copy = {
 	        .imageSubresource = {
@@ -306,6 +347,9 @@ namespace vb::builder {
     void Image::clean() {
 	vkDestroyImageView(ctx->device, image_view, nullptr);
 	vmaDestroyImage(ctx->vma_allocator, image, allocation);
+	image_view = VK_NULL_HANDLE;
+	image = VK_NULL_HANDLE;
+	allocation = VK_NULL_HANDLE;
     }
 
     void GraphicsPipeline::add_shader(VkShaderModule& shader_module, VkShaderStageFlagBits stage) {
@@ -406,6 +450,8 @@ namespace vb::builder {
     void GraphicsPipeline::clean() {
 	vkDestroyPipeline(ctx->device, pipeline, nullptr);
 	vkDestroyPipelineLayout(ctx->device, layout, nullptr);
+	pipeline = VK_NULL_HANDLE;
+	layout = VK_NULL_HANDLE;
     }
 }
 
@@ -417,7 +463,6 @@ namespace vb {
 	window = SDL_CreateWindow(info.title.c_str(), info.width, info.height, info.sdl3_window_flags);
 	VB_ASSERT(window);
 	SDL_SetWindowMinimumSize(window, info.width, info.height);
-	render_aspect_ratio = (float)info.height/(float)info.width;
 #ifndef NDEBUG
 	if(test_for_validation_layers()) validation_layers_support = true;
 	else log("Running debug build without support for Vulkan validation layers");
@@ -431,21 +476,11 @@ namespace vb {
 	create_device();
 	create_swapchain(info.width, info.height);
 	create_swapchain_image_views();
-	create_frames();
 	init_vma();
-	init_quick_cmd();
     }
 
     Context::~Context() {
-	vkDestroyCommandPool(device, quick_command_info.cmd_pool, nullptr);
-    	vkDestroyFence(device, quick_command_info.fence, nullptr);
 	vmaDestroyAllocator(vma_allocator);
-	for(auto& frame: frames) {
-	    vkDestroyCommandPool(device, frame.cmd_pool, nullptr);
-	    vkDestroyFence(device, frame.render_fence, nullptr);
-	    vkDestroySemaphore(device, frame.image_available_semaphore, nullptr);
-	    vkDestroySemaphore(device, frame.finish_render_semaphore, nullptr);
-	}
 	destroy_swapchain();
 	vkDestroyDevice(device, nullptr);
 	vkDestroySurfaceKHR(instance, surface, nullptr);
@@ -459,29 +494,6 @@ namespace vb {
 	vkDestroyInstance(instance, nullptr);
 	SDL_DestroyWindow(window);
 	SDL_Quit();
-    }
-
-    void Context::submit_quick_command(std::function<void(VkCommandBuffer cmd)>&& fn) {
-	vkResetFences(device, 1, &quick_command_info.fence);
-	vkResetCommandBuffer(quick_command_info.cmd_buffer, 0);
-	VkCommandBufferBeginInfo begin = {
-	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-	    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-	};
-	VB_ASSERT(vkBeginCommandBuffer(quick_command_info.cmd_buffer, &begin) == VK_SUCCESS);
-	fn(quick_command_info.cmd_buffer);
-	VB_ASSERT(vkEndCommandBuffer(quick_command_info.cmd_buffer) == VK_SUCCESS);
-	VkCommandBufferSubmitInfo cmd_info = {
-	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-	    .commandBuffer = quick_command_info.cmd_buffer,
-	};
- 	VkSubmitInfo2 submit = {
- 	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-	    .commandBufferInfoCount = 1,
-	    .pCommandBufferInfos = &cmd_info,
- 	};
- 	VB_ASSERT(vkQueueSubmit2(queues_info.graphics_queue, 1, &submit, quick_command_info.fence) == VK_SUCCESS);
-	vkWaitForFences(device, 1, &quick_command_info.fence, 1, UINT64_MAX);
     }
 
     void Context::create_instance() {
@@ -807,18 +819,6 @@ namespace vb {
 	swapchain = temp_swapchain;
     	vkGetSwapchainImagesKHR(device, swapchain, &swapchain_support_data.image_count, swapchain_images.data());
 	create_swapchain_image_views();
-	resize = false;
-    }
-
-    void Context::create_frames() {
-	for(auto& frame: frames) {
-	    frame.cmd_pool = create::cmd_pool(device, queues_info.graphics_index, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
-	    auto info = fill::cmd_buffer_allocate_info(frame.cmd_pool);
-	    VB_ASSERT(vkAllocateCommandBuffers(device, &info, &frame.cmd_buffer) == VK_SUCCESS);
-	    frame.render_fence = create::fence(device, VK_FENCE_CREATE_SIGNALED_BIT);
-	    frame.image_available_semaphore = create::semaphore(device);
-	    frame.finish_render_semaphore = create::semaphore(device);
-	}
     }
 
     void Context::init_vma() {
@@ -829,13 +829,6 @@ namespace vb {
 	    .instance = instance,
 	};
         VB_ASSERT(vmaCreateAllocator(&info, &vma_allocator) == VK_SUCCESS);
-    }
-
-    void Context::init_quick_cmd() {
-	quick_command_info.cmd_pool = create::cmd_pool(device, queues_info.graphics_index, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);;
-	auto info = fill::cmd_buffer_allocate_info(quick_command_info.cmd_pool);
-	VB_ASSERT(vkAllocateCommandBuffers(device, &info, &quick_command_info.cmd_buffer) == VK_SUCCESS);
-	quick_command_info.fence = create::fence(device);
     }
 
 #ifndef NDEBUG

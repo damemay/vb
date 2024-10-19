@@ -1,4 +1,9 @@
+#define GLM_FORCE_RADIANS
+#define GLM_ENABLE_EXPERIMENTAL
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/transform.hpp>
 #include <SDL3/SDL_events.h>
 #include <memory>
 #include <format>
@@ -19,6 +24,14 @@ struct PushConstants {
     VkDeviceAddress vertex_buffer;
 };
 
+struct Frame {
+    vb::builder::CommandPool pool;
+    VkCommandBuffer cmd;
+    VkSemaphore image_available;
+    VkSemaphore finish_render;
+    VkFence render;
+};
+
 struct Rectangle {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
@@ -26,7 +39,7 @@ struct Rectangle {
     vb::builder::Buffer index_buffer;
     VkDeviceAddress vertex_buffer_address;
 
-    Rectangle(vb::Context* context, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
+    Rectangle(vb::Context* context, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, vb::builder::CommandPool pool)
 	: vertex_buffer{context}, index_buffer{context}, vertices{vertices}, indices{indices} {
 	    const size_t vertices_size = sizeof(Vertex) * vertices.size();
 	    vertex_buffer.create(vertices_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT 
@@ -51,7 +64,9 @@ struct Rectangle {
     	    memcpy(staging_buffer.info.pMappedData, vertices.data(), vertices_size);
     	    memcpy((char*)(staging_buffer.info.pMappedData)+vertices_size, indices.data(),
 		    indices_size);
-    	    context->submit_quick_command([&](VkCommandBuffer cmd) {
+	    auto cmd = pool.allocate();
+	    if(!cmd) return;
+	    pool.submit_command_buffer_to_queue(cmd, [&](VkCommandBuffer cmd) {
     	        VkBufferCopy copy = { .size = vertices_size };
     	        vkCmdCopyBuffer(cmd, staging_buffer.buffer, vertex_buffer.buffer, 1, &copy);
     	        VkBufferCopy copy2 = { .srcOffset = vertices_size, .size = indices_size };
@@ -93,11 +108,9 @@ int main(int argc, char** argv) {
     auto available_extensions = vbc->get_available_extensions();
     auto enabled_extensions = vbc->get_enabled_extensions();
     vb::log("available extensions:");
-    for(auto& ext: available_extensions) vb::log(ext);
+    for(auto& ext: available_extensions) vb::log(std::format("\t{}",ext));
     vb::log("enabled extensions:");
-    for(auto& ext: enabled_extensions) vb::log(ext);
-
-    vb::log(std::format("{} {}", vbc->queues_info.compute_index, vbc->queues_info.graphics_index));
+    for(auto& ext: enabled_extensions) vb::log(std::format("\t{}",ext));
 
     auto vkGetDescriptorSetLayoutSizeEXT = (PFN_vkGetDescriptorSetLayoutSizeEXT)vkGetDeviceProcAddr(vbc->device, "vkGetDescriptorSetLayoutSizeEXT");
     auto vkGetDescriptorSetLayoutBindingOffsetEXT = (PFN_vkGetDescriptorSetLayoutBindingOffsetEXT)vkGetDeviceProcAddr(vbc->device, "vkGetDescriptorSetLayoutBindingOffsetEXT");
@@ -105,12 +118,16 @@ int main(int argc, char** argv) {
     auto vkCmdSetDescriptorBufferOffsetsEXT = (PFN_vkCmdSetDescriptorBufferOffsetsEXT)vkGetDeviceProcAddr(vbc->device, "vkCmdSetDescriptorBufferOffsetsEXT");
     auto vkCmdBindDescriptorBuffersEXT = (PFN_vkCmdBindDescriptorBuffersEXT)vkGetDeviceProcAddr(vbc->device, "vkCmdBindDescriptorBuffersEXT");
 
+    auto cmdpool = vb::builder::CommandPool(vbc.get());
+    cmdpool.create(vbc->queues_info.graphics_queue, vbc->queues_info.graphics_index);
+    cmdpool.all_valid();
+
     int tw, th, tc;
     stbi_uc* data = stbi_load("../textures/texture.jpg", &tw, &th, &tc, STBI_rgb_alpha);
     VB_ASSERT(data);
     auto texture = vb::builder::Image(vbc.get());
     VkExtent3D size = {(uint32_t)tw,(uint32_t)th,1};
-    texture.create(data, size);
+    texture.create(cmdpool, data, size);
     VB_ASSERT(texture.all_valid());
 
     VkPhysicalDeviceProperties pdev_prop{};
@@ -143,14 +160,14 @@ int main(int argc, char** argv) {
     	{{-0.5f, 0.5f,  0.0f}, 1.0f, {1.0f, 1.0f, 1.0f}, 1.0f, {1.0f, 1.0f, 0.0f, 1.0f}}
     };
     const std::vector<uint32_t> indices = {0,1,2,2,3,0};
-    Rectangle rectangle {vbc.get(), vertices, indices};
+    Rectangle rectangle {vbc.get(), vertices, indices, cmdpool};
     const std::vector<Vertex> vertices2 = {
     	{{-0.5f, -0.5f, -0.5f}, 1.0f, {1.0f, 1.0f, 1.0f}, 0.0f, {1.0f, 0.0f, 0.0f, 1.0f}},
 	{{0.5f,  -0.5f, -0.5f}, 0.0f, {1.0f, 1.0f, 1.0f}, 0.0f, {0.0f, 1.0f, 0.0f, 1.0f}},
     	{{0.5f,  0.5f,  -0.5f}, 0.0f, {1.0f, 1.0f, 1.0f}, 1.0f, {0.0f, 0.0f, 1.0f, 1.0f}},
     	{{-0.5f, 0.5f,  -0.5f}, 1.0f, {1.0f, 1.0f, 1.0f}, 1.0f, {1.0f, 1.0f, 0.0f, 1.0f}}
     };
-    Rectangle rectangle2 {vbc.get(), vertices2, indices};
+    Rectangle rectangle2 {vbc.get(), vertices2, indices, cmdpool};
 
     VkDescriptorSetLayoutBinding binding {
 	.binding = 0,
@@ -183,7 +200,7 @@ int main(int argc, char** argv) {
     auto descriptor_buffer = vb::builder::Buffer(vbc.get());
     descriptor_buffer.create(size.depth*size.width*size.height*4*layout_size,
 	    VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-    // VB_ASSERT(descriptor_buffer.all_valid());
+    VB_ASSERT(descriptor_buffer.all_valid());
     char* buffer_data = (char*)descriptor_buffer.info.pMappedData;
     VkDescriptorImageInfo image_info {
 	.sampler = sampler,
@@ -312,9 +329,39 @@ int main(int argc, char** argv) {
     VB_ASSERT(vkCreateComputePipelines(vbc->device, 0, 1, &compute_info, nullptr, &compute_pipeline) == VK_SUCCESS);
     vkDestroyShaderModule(vbc->device, comp_shader, nullptr);
 
+    vbc->set_resize_callback([&]() {
+	vbc->recreate_swapchain([&](uint32_t,uint32_t) {
+	    depth_image.clean();
+	    comp_image.clean();
+	});
+	depth_image.create({vbc->swapchain_extent.width, vbc->swapchain_extent.height, 1},
+	    VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+	comp_image.create({vbc->swapchain_extent.width, vbc->swapchain_extent.height, 1},
+	    VK_FORMAT_R16G16B16A16_SFLOAT);
+    });
+
+    cmdpool.clean();
+
+    Frame frames[2] = {{vbc.get()},{vbc.get()}};
+    for(auto& frame: frames) {
+	frame.pool.create(vbc->queues_info.graphics_queue, vbc->queues_info.graphics_index);
+	VB_ASSERT(frame.pool.all_valid());
+	frame.cmd = frame.pool.allocate();
+	VB_ASSERT(frame.cmd);
+	frame.render = vb::create::fence(vbc->device, VK_FENCE_CREATE_SIGNALED_BIT);
+	VB_ASSERT(frame.render);
+	frame.image_available = vb::create::semaphore(vbc->device);
+	VB_ASSERT(frame.image_available);
+	frame.finish_render = vb::create::semaphore(vbc->device);
+	VB_ASSERT(frame.finish_render);
+    }
+
+    uint8_t frame_index = 0;
+
     bool running = true;
     SDL_Event event;
     while(running) {
+	bool resize = false;
 	while(SDL_PollEvent(&event) != 0) {
 	    switch(event.type) {
 		case SDL_EVENT_QUIT:
@@ -322,7 +369,7 @@ int main(int argc, char** argv) {
 		    break;
 		case SDL_EVENT_WINDOW_RESIZED: case SDL_EVENT_WINDOW_MAXIMIZED:
 		case SDL_EVENT_WINDOW_ENTER_FULLSCREEN: case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
-		    vbc->resize = true;
+		    resize = true;
 		    break;
 		case SDL_EVENT_WINDOW_HIDDEN: case SDL_EVENT_WINDOW_MINIMIZED: case SDL_EVENT_WINDOW_OCCLUDED:
 		    SDL_WaitEvent(&event);
@@ -330,43 +377,35 @@ int main(int argc, char** argv) {
 	    }
 	}
 
-	if(vbc->resize) {
-	    vbc->recreate_swapchain([&](uint32_t,uint32_t) {
-		depth_image.clean();
-		comp_image.clean();
-	    });
-	    depth_image.create({vbc->swapchain_extent.width, vbc->swapchain_extent.height, 1},
-		VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
-	    comp_image.create({vbc->swapchain_extent.width, vbc->swapchain_extent.height, 1},
-		VK_FORMAT_R16G16B16A16_SFLOAT);
+	if(resize) {
+	    vbc->resize_callback();
+	    resize = false;
 	}
 
-	auto frame = vbc->get_current_frame();
-	uint32_t image_index = 0;
-	{
-	    auto image = vbc->wait_on_image_reset_fence(frame);
-	    if(!image.has_value()) continue;
-	    image_index = image.value();
-	}
-
- 	vkResetCommandBuffer(frame->cmd_buffer, 0);
+	auto frame = &frames[frame_index%2];
+	vkWaitForFences(vbc->device, 1, &frame->render, VK_TRUE, UINT64_MAX);
+	auto next = vbc->acquire_next_image(frame->image_available);
+	if(!next.has_value()) continue;
+	uint32_t image_index = next.value();
+	vkResetFences(vbc->device, 1, &frame->render);
+ 	vkResetCommandBuffer(frame->cmd, 0);
  	VkCommandBufferBeginInfo begin {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
- 	VB_ASSERT(vkBeginCommandBuffer(frame->cmd_buffer, &begin) == VK_SUCCESS);
+ 	VB_ASSERT(vkBeginCommandBuffer(frame->cmd, &begin) == VK_SUCCESS);
 
 	VkClearValue color[2] {
 	    {.color = {0.0f, 0.0f, 0.0f, 1.0f}},
 	    {.depthStencil = {1.0f, 0}},
 	};
-	vb::sync::transition_image(frame->cmd_buffer, comp_image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
-	vkCmdBindPipeline(frame->cmd_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute_pipeline);
-	vkCmdBindDescriptorBuffersEXT(frame->cmd_buffer, 1, &cbinding_info);
-	vkCmdSetDescriptorBufferOffsetsEXT(frame->cmd_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute_layout, 0, 1, &cbuffer_index, &cbinding_offset);
-	vkCmdDispatch(frame->cmd_buffer, ceil(vbc->swapchain_extent.width/16.0), ceil(vbc->swapchain_extent.height/16.0), 1);
-	vb::sync::transition_image(frame->cmd_buffer, comp_image.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-	vb::sync::transition_image(frame->cmd_buffer, vbc->swapchain_images[image_index], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-	vb::sync::blit_image(frame->cmd_buffer, comp_image.image, vbc->swapchain_images[image_index], comp_image.extent, {vbc->swapchain_extent.width, vbc->swapchain_extent.height, 1});
-	vb::sync::transition_image(frame->cmd_buffer, vbc->swapchain_images[image_index], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-	vb::sync::transition_image(frame->cmd_buffer, depth_image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+	vb::sync::transition_image(frame->cmd, comp_image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+	vkCmdBindPipeline(frame->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, compute_pipeline);
+	vkCmdBindDescriptorBuffersEXT(frame->cmd, 1, &cbinding_info);
+	vkCmdSetDescriptorBufferOffsetsEXT(frame->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, compute_layout, 0, 1, &cbuffer_index, &cbinding_offset);
+	vkCmdDispatch(frame->cmd, ceil(vbc->swapchain_extent.width/16.0), ceil(vbc->swapchain_extent.height/16.0), 1);
+	vb::sync::transition_image(frame->cmd, comp_image.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	vb::sync::transition_image(frame->cmd, vbc->swapchain_images[image_index], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	vb::sync::blit_image(frame->cmd, comp_image.image, vbc->swapchain_images[image_index], comp_image.extent, {vbc->swapchain_extent.width, vbc->swapchain_extent.height, 1});
+	vb::sync::transition_image(frame->cmd, vbc->swapchain_images[image_index], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+	vb::sync::transition_image(frame->cmd, depth_image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 	VkRenderingAttachmentInfo color_info = {
 	    .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
 	    .imageView = vbc->swapchain_image_views[image_index],
@@ -390,44 +429,44 @@ int main(int argc, char** argv) {
 	    .pColorAttachments = &color_info,
 	    .pDepthAttachment = &depth_info,
 	};
-	vkCmdBeginRendering(frame->cmd_buffer, &render_info);
-	vkCmdBindPipeline(frame->cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline.pipeline);
+	vkCmdBeginRendering(frame->cmd, &render_info);
+	vkCmdBindPipeline(frame->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline.pipeline);
 	VkViewport viewport {0.0f, 0.0f, (float)vbc->swapchain_extent.width, (float)vbc->swapchain_extent.height};
-	vkCmdSetViewport(frame->cmd_buffer, 0, 1, &viewport);
+	vkCmdSetViewport(frame->cmd, 0, 1, &viewport);
 	VkRect2D scissor {{0,0}, vbc->swapchain_extent};
-	vkCmdSetScissor(frame->cmd_buffer, 0, 1, &scissor);
+	vkCmdSetScissor(frame->cmd, 0, 1, &scissor);
 
-	vkCmdBindDescriptorBuffersEXT(frame->cmd_buffer, 1, &binding_info);
-	vkCmdSetDescriptorBufferOffsetsEXT(frame->cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline.layout, 0, 1, &buffer_index, &binding_offset);
+	vkCmdBindDescriptorBuffersEXT(frame->cmd, 1, &binding_info);
+	vkCmdSetDescriptorBufferOffsetsEXT(frame->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline.layout, 0, 1, &buffer_index, &binding_offset);
 	// glm::mat4 model = glm::mat4(1);
 	// model = glm::rotate(model, glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 	glm::mat4 view = glm::lookAt(glm::vec3(2.0f), glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 	glm::mat4 proj = glm::perspective(glm::radians(45.0f), (float)vbc->swapchain_extent.width/(float)vbc->swapchain_extent.height, 0.1f, 100.0f);
 	proj[1][1] *= -1;
 	auto push_constants = PushConstants{proj * view, rectangle.vertex_buffer_address};
-	vkCmdPushConstants(frame->cmd_buffer, graphics_pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &push_constants);
-	vkCmdBindIndexBuffer(frame->cmd_buffer, rectangle.index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-	vkCmdDrawIndexed(frame->cmd_buffer, (uint32_t)indices.size(), 2, 0, 0, 0);
+	vkCmdPushConstants(frame->cmd, graphics_pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &push_constants);
+	vkCmdBindIndexBuffer(frame->cmd, rectangle.index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+	vkCmdDrawIndexed(frame->cmd, (uint32_t)indices.size(), 2, 0, 0, 0);
 	push_constants = PushConstants{proj * view, rectangle2.vertex_buffer_address};
-	vkCmdPushConstants(frame->cmd_buffer, graphics_pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &push_constants);
-	vkCmdBindIndexBuffer(frame->cmd_buffer, rectangle2.index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-	vkCmdDrawIndexed(frame->cmd_buffer, (uint32_t)indices.size(), 2, 0, 0, 0);
-	vkCmdEndRendering(frame->cmd_buffer);
-	vb::sync::transition_image(frame->cmd_buffer, vbc->swapchain_images[image_index], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+	vkCmdPushConstants(frame->cmd, graphics_pipeline.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &push_constants);
+	vkCmdBindIndexBuffer(frame->cmd, rectangle2.index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+	vkCmdDrawIndexed(frame->cmd, (uint32_t)indices.size(), 2, 0, 0, 0);
+	vkCmdEndRendering(frame->cmd);
+	vb::sync::transition_image(frame->cmd, vbc->swapchain_images[image_index], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
-	VB_ASSERT(vkEndCommandBuffer(frame->cmd_buffer) == VK_SUCCESS);
+	VB_ASSERT(vkEndCommandBuffer(frame->cmd) == VK_SUCCESS);
 	VkCommandBufferSubmitInfo cmd_info = {
 	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-	    .commandBuffer = frame->cmd_buffer,
+	    .commandBuffer = frame->cmd,
 	};
 	VkSemaphoreSubmitInfo wait_info = {
 	    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-	    .semaphore = frame->image_available_semaphore,
+	    .semaphore = frame->image_available,
 	    .stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
 	};
 	VkSemaphoreSubmitInfo signal_info = {
 	    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-	    .semaphore = frame->finish_render_semaphore,
+	    .semaphore = frame->finish_render,
 	    .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
 	};
  	VkSubmitInfo2 submit = {
@@ -439,19 +478,19 @@ int main(int argc, char** argv) {
 	    .signalSemaphoreInfoCount = 1,
 	    .pSignalSemaphoreInfos = &signal_info,
  	};
- 	VB_ASSERT(vkQueueSubmit2(vbc->queues_info.graphics_queue, 1, &submit, frame->render_fence) == VK_SUCCESS);
+ 	VB_ASSERT(vkQueueSubmit2(vbc->queues_info.graphics_queue, 1, &submit, frame->render) == VK_SUCCESS);
  
  	VkPresentInfoKHR present = {
  	    .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
  	    .waitSemaphoreCount = 1,
- 	    .pWaitSemaphores = &frame->finish_render_semaphore,
+ 	    .pWaitSemaphores = &frame->finish_render,
  	    .swapchainCount = 1,
  	    .pSwapchains = &vbc->swapchain,
  	    .pImageIndices = &image_index,
  	};
  	vkQueuePresentKHR(vbc->queues_info.graphics_queue, &present);
 
-	vbc->frame_index++;
+	frame_index++;
     }
     vkDeviceWaitIdle(vbc->device);
 
@@ -470,4 +509,10 @@ int main(int argc, char** argv) {
     vkDestroyDescriptorSetLayout(vbc->device, compute_dlayout, nullptr);
     cdescriptor_buffer.clean();
     depth_image.clean();
+    for(auto& frame: frames) {
+	frame.pool.clean();
+	vkDestroySemaphore(vbc->device, frame.finish_render, nullptr);
+	vkDestroySemaphore(vbc->device, frame.image_available, nullptr);
+	vkDestroyFence(vbc->device, frame.render, nullptr);
+    }
 }
