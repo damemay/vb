@@ -333,9 +333,12 @@ int main(int argc, char** argv) {
 	if(vbc->resize) {
 	    vbc->recreate_swapchain([&](uint32_t,uint32_t) {
 		depth_image.clean();
+		comp_image.clean();
 	    });
 	    depth_image.create({vbc->swapchain_extent.width, vbc->swapchain_extent.height, 1},
 		VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+	    comp_image.create({vbc->swapchain_extent.width, vbc->swapchain_extent.height, 1},
+		VK_FORMAT_R16G16B16A16_SFLOAT);
 	}
 
 	auto frame = vbc->get_current_frame();
