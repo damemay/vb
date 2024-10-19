@@ -321,7 +321,7 @@ namespace vb::builder {
     	    .viewType = VK_IMAGE_VIEW_TYPE_2D,
     	    .format = format,
     	    .subresourceRange = {
-    	       .aspectMask = aspect,
+		.aspectMask = aspect,
 		.levelCount = 1,
 		.layerCount = 1,
     	    },

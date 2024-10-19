@@ -1,9 +1,105 @@
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <SDL3/SDL_events.h>
 #include <memory>
+#include <format>
 #include <vb.h>
 #include <vulkan/vulkan_core.h>
 #include <stb/stb_image.h>
+
+struct DescriptorBuffersBuilder : public vb::ContextDependant {
+    VkPhysicalDeviceDescriptorBufferPropertiesEXT properties {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_PROPERTIES_EXT};
+    PFN_vkGetDescriptorSetLayoutSizeEXT vkGetDescriptorSetLayoutSizeEXT;
+    PFN_vkGetDescriptorSetLayoutBindingOffsetEXT vkGetDescriptorSetLayoutBindingOffsetEXT;
+    PFN_vkGetDescriptorEXT vkGetDescriptorEXT;
+    PFN_vkCmdSetDescriptorBufferOffsetsEXT vkCmdSetDescriptorBufferOffsetsEXT;
+    PFN_vkCmdBindDescriptorBuffersEXT vkCmdBindDescriptorBuffersEXT;
+
+    inline VkDeviceSize aligned_size(VkDeviceSize value, VkDeviceSize alignment) {
+	return (value+alignment-1)&~(alignment-1);
+    }
+
+    DescriptorBuffersBuilder(vb::Context* context) {
+	ctx = context;
+	vkGetDescriptorSetLayoutSizeEXT = (PFN_vkGetDescriptorSetLayoutSizeEXT)vkGetDeviceProcAddr(ctx->device, "vkGetDescriptorSetLayoutSizeEXT");
+    	vkGetDescriptorSetLayoutBindingOffsetEXT = (PFN_vkGetDescriptorSetLayoutBindingOffsetEXT)vkGetDeviceProcAddr(ctx->device, "vkGetDescriptorSetLayoutBindingOffsetEXT");
+    	vkGetDescriptorEXT = (PFN_vkGetDescriptorEXT)vkGetDeviceProcAddr(ctx->device, "vkGetDescriptorEXT");
+    	vkCmdSetDescriptorBufferOffsetsEXT = (PFN_vkCmdSetDescriptorBufferOffsetsEXT)vkGetDeviceProcAddr(ctx->device, "vkCmdSetDescriptorBufferOffsetsEXT");
+    	vkCmdBindDescriptorBuffersEXT = (PFN_vkCmdBindDescriptorBuffersEXT)vkGetDeviceProcAddr(ctx->device, "vkCmdBindDescriptorBuffersEXT");
+	VkPhysicalDeviceProperties2 device_properties = {
+	    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+	    &properties,
+	};
+	vkGetPhysicalDeviceProperties2(ctx->physical_device, &device_properties);
+    }
+
+    struct DescriptorBufferData {
+	size_t layout_size {0};
+	size_t binding_offset {0};
+	size_t buffer_size {0};
+	VkBufferUsageFlags usage {0};
+	vb::builder::Buffer buffer;
+    };
+
+    DescriptorBufferData create_buffer(size_t bound_data_size, VkDescriptorSetLayout layout, VkBufferUsageFlags usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
+	size_t layout_size = 0;
+	vkGetDescriptorSetLayoutSizeEXT(ctx->device, layout, &layout_size);
+	layout_size = aligned_size(layout_size, properties.descriptorBufferOffsetAlignment);
+	size_t binding_offset = 0;
+	vkGetDescriptorSetLayoutBindingOffsetEXT(ctx->device, layout, 0, &binding_offset);
+	auto descriptor_buffer = vb::builder::Buffer(ctx);
+	size_t bsize = bound_data_size*layout_size;
+	descriptor_buffer.create(bsize, usage, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	VB_ASSERT(descriptor_buffer.all_valid());
+	return DescriptorBufferData{layout_size, binding_offset, bsize, usage, descriptor_buffer};
+    }
+
+    VkDescriptorBufferBindingInfoEXT get_resource_descriptor_bindings(DescriptorBufferData& buffer, VkDescriptorType type) {
+	VkBufferDeviceAddressInfo baddr_info {
+    	    .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+	    .buffer = buffer.buffer.buffer,
+	};
+	auto buffer_address = vkGetBufferDeviceAddress(ctx->device, &baddr_info);
+	VkDescriptorAddressInfoEXT addr_info = {
+	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_ADDRESS_INFO_EXT,
+	    .address = buffer_address,
+	    .range = buffer.buffer_size,
+	};
+	VkDescriptorGetInfoEXT desc_info = {
+	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT,
+	    .type = type,
+	    .data = {
+		.pUniformBuffer = &addr_info,
+	    },
+	};
+	vkGetDescriptorEXT(ctx->device, &desc_info, properties.uniformBufferDescriptorSize, buffer.buffer.info.pMappedData);
+	return VkDescriptorBufferBindingInfoEXT {
+	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT,
+	    .address = buffer_address,
+	    .usage = buffer.usage,
+	};
+    }
+
+    VkDescriptorBufferBindingInfoEXT get_image_descriptor_bindings(DescriptorBufferData& buffer, VkDescriptorImageInfo* descriptor_image_info, VkDescriptorType type) {
+	VkBufferDeviceAddressInfo baddr_info {
+    	    .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+	    .buffer = buffer.buffer.buffer,
+	};
+	auto buffer_address = vkGetBufferDeviceAddress(ctx->device, &baddr_info);
+	VkDescriptorGetInfoEXT desc_info = {
+	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT,
+	    .type = type,
+	    .data = {
+		.pCombinedImageSampler = descriptor_image_info,
+	    },
+	};
+	vkGetDescriptorEXT(ctx->device, &desc_info, properties.combinedImageSamplerDescriptorSize, buffer.buffer.info.pMappedData);
+	return VkDescriptorBufferBindingInfoEXT {
+	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT,
+	    .address = buffer_address,
+	    .usage = buffer.usage,
+	};
+    }
+};
 
 struct Vertex {
     glm::vec3 position;
@@ -60,100 +156,6 @@ struct Rectangle {
     }
 };
 
-struct DescriptorBuffersBuilder : public vb::ContextDependant {
-    VkPhysicalDeviceDescriptorBufferPropertiesEXT properties {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_PROPERTIES_EXT};
-    PFN_vkGetDescriptorSetLayoutSizeEXT vkGetDescriptorSetLayoutSizeEXT;
-    PFN_vkGetDescriptorSetLayoutBindingOffsetEXT vkGetDescriptorSetLayoutBindingOffsetEXT;
-    PFN_vkGetDescriptorEXT vkGetDescriptorEXT;
-    PFN_vkCmdSetDescriptorBufferOffsetsEXT vkCmdSetDescriptorBufferOffsetsEXT;
-    PFN_vkCmdBindDescriptorBuffersEXT vkCmdBindDescriptorBuffersEXT;
-
-    [[nodiscard]] inline VkDeviceSize aligned_size(VkDeviceSize value, VkDeviceSize alignment) {
-	return (value+alignment-1)&~(alignment-1);
-    }
-
-    [[nodiscard]] DescriptorBuffersBuilder(vb::Context* context) {
-	ctx = context;
-	vkGetDescriptorSetLayoutSizeEXT = (PFN_vkGetDescriptorSetLayoutSizeEXT)vkGetDeviceProcAddr(ctx->device, "vkGetDescriptorSetLayoutSizeEXT");
-    	vkGetDescriptorSetLayoutBindingOffsetEXT = (PFN_vkGetDescriptorSetLayoutBindingOffsetEXT)vkGetDeviceProcAddr(ctx->device, "vkGetDescriptorSetLayoutBindingOffsetEXT");
-    	vkGetDescriptorEXT = (PFN_vkGetDescriptorEXT)vkGetDeviceProcAddr(ctx->device, "vkGetDescriptorEXT");
-    	vkCmdSetDescriptorBufferOffsetsEXT = (PFN_vkCmdSetDescriptorBufferOffsetsEXT)vkGetDeviceProcAddr(ctx->device, "vkCmdSetDescriptorBufferOffsetsEXT");
-    	vkCmdBindDescriptorBuffersEXT = (PFN_vkCmdBindDescriptorBuffersEXT)vkGetDeviceProcAddr(ctx->device, "vkCmdBindDescriptorBuffersEXT");
-	VkPhysicalDeviceProperties2 device_properties = {
-	    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-	    &properties,
-	};
-	vkGetPhysicalDeviceProperties2(ctx->physical_device, &device_properties);
-    }
-
-    struct DescriptorBufferData {
-	size_t layout_size {0};
-	size_t binding_offset {0};
-	size_t buffer_size {0};
-	VkBufferUsageFlags usage {0};
-	vb::builder::Buffer buffer;
-    };
-
-    [[nodiscard]] DescriptorBufferData create_buffer(size_t bound_data_size, VkDescriptorSetLayout layout, VkBufferUsageFlags usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
-	size_t layout_size = 0;
-	vkGetDescriptorSetLayoutSizeEXT(ctx->device, layout, &layout_size);
-	layout_size = aligned_size(layout_size, properties.descriptorBufferOffsetAlignment);
-	size_t binding_offset = 0;
-	vkGetDescriptorSetLayoutBindingOffsetEXT(ctx->device, layout, 0, &binding_offset);
-	auto descriptor_buffer = vb::builder::Buffer(ctx);
-	size_t bsize = bound_data_size*layout_size;
-	descriptor_buffer.create(bsize, usage, VMA_MEMORY_USAGE_CPU_TO_GPU);
-	VB_ASSERT(descriptor_buffer.all_valid());
-	return DescriptorBufferData{layout_size, binding_offset, bsize, usage, descriptor_buffer};
-    }
-
-    [[nodiscard]] VkDescriptorBufferBindingInfoEXT get_resource_descriptor_bindings(DescriptorBufferData& buffer, VkDescriptorType type) {
-	VkBufferDeviceAddressInfo baddr_info {
-    	    .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-	    .buffer = buffer.buffer.buffer,
-	};
-	auto buffer_address = vkGetBufferDeviceAddress(ctx->device, &baddr_info);
-	VkDescriptorAddressInfoEXT addr_info = {
-	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_ADDRESS_INFO_EXT,
-	    .address = buffer_address,
-	    .range = buffer.buffer_size,
-	};
-	VkDescriptorGetInfoEXT desc_info = {
-	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT,
-	    .type = type,
-	    .data = {
-		.pUniformBuffer = &addr_info,
-	    },
-	};
-	vkGetDescriptorEXT(ctx->device, &desc_info, properties.uniformBufferDescriptorSize, buffer.buffer.info.pMappedData);
-	return VkDescriptorBufferBindingInfoEXT {
-	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT,
-	    .address = buffer_address,
-	    .usage = buffer.usage,
-	};
-    }
-
-    [[nodiscard]] VkDescriptorBufferBindingInfoEXT get_image_descriptor_bindings(DescriptorBufferData& buffer, VkDescriptorImageInfo* descriptor_image_info, VkDescriptorType type) {
-	VkBufferDeviceAddressInfo baddr_info {
-    	    .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-	    .buffer = buffer.buffer.buffer,
-	};
-	auto buffer_address = vkGetBufferDeviceAddress(ctx->device, &baddr_info);
-	VkDescriptorGetInfoEXT desc_info = {
-	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT,
-	    .type = type,
-	    .data = {
-		.pCombinedImageSampler = descriptor_image_info,
-	    },
-	};
-	vkGetDescriptorEXT(ctx->device, &desc_info, properties.combinedImageSamplerDescriptorSize, buffer.buffer.info.pMappedData);
-	return VkDescriptorBufferBindingInfoEXT {
-	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT,
-	    .address = buffer_address,
-	    .usage = buffer.usage,
-	};
-    }
-};
 
 int main(int argc, char** argv) {
     VkPhysicalDeviceDescriptorBufferFeaturesEXT buffer_ext = {
@@ -183,6 +185,9 @@ int main(int argc, char** argv) {
     for(auto& ext: available_extensions) vb::log(ext);
     vb::log("enabled extensions:");
     for(auto& ext: enabled_extensions) vb::log(ext);
+
+    vb::log(std::format("{} {}", vbc->queues_info.compute_index, vbc->queues_info.graphics_index));
+
 
     int tw, th, tc;
     stbi_uc* data = stbi_load("../textures/texture.jpg", &tw, &th, &tc, STBI_rgb_alpha);
@@ -246,14 +251,47 @@ int main(int argc, char** argv) {
     VkDescriptorSetLayout layout;
     VB_ASSERT(vkCreateDescriptorSetLayout(vbc->device, &layout_info, nullptr, &layout) == VK_SUCCESS);
 
-    auto descriptor_builder = DescriptorBuffersBuilder(vbc.get());
-    auto texture_descriptor_buffer = descriptor_builder.create_buffer(size.depth*size.width*size.height*4, layout, VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+    VkPhysicalDeviceDescriptorBufferPropertiesEXT descriptor_buffer_prop = {
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_PROPERTIES_EXT
+    };
+    VkPhysicalDeviceProperties2 properties = {
+	VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+	&descriptor_buffer_prop,
+    };
+    vkGetPhysicalDeviceProperties2(vbc->physical_device, &properties);
+    size_t layout_size = 0;
+    vkGetDescriptorSetLayoutSizeEXT(vbc->device, layout, &layout_size);
+    layout_size = aligned_size(layout_size, descriptor_buffer_prop.descriptorBufferOffsetAlignment);
+    size_t binding_offset = 0;
+    vkGetDescriptorSetLayoutBindingOffsetEXT(vbc->device, layout, 0, &binding_offset);
+    auto descriptor_buffer = vb::builder::Buffer(vbc.get());
+    descriptor_buffer.create(size.depth*size.width*size.height*4*layout_size,
+	    VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    // VB_ASSERT(descriptor_buffer.all_valid());
+    char* buffer_data = (char*)descriptor_buffer.info.pMappedData;
     VkDescriptorImageInfo image_info {
 	.sampler = sampler,
 	.imageView = texture.image_view,
 	.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
     };
-    auto texture_binding = descriptor_builder.get_image_descriptor_bindings(texture_descriptor_buffer, &image_info, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    VkDescriptorGetInfoEXT image_desc_info {
+	.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT,
+	.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+	.data {
+	    .pCombinedImageSampler = &image_info,
+	},
+    };
+    vkGetDescriptorEXT(vbc->device, &image_desc_info, descriptor_buffer_prop.combinedImageSamplerDescriptorSize, buffer_data+0 * layout_size + binding_offset);
+    VkBufferDeviceAddressInfo addr_info {
+	.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+	.buffer = descriptor_buffer.buffer,
+    };
+    auto address = vkGetBufferDeviceAddress(vbc->device, &addr_info);
+    VkDescriptorBufferBindingInfoEXT binding_info = {
+	.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT,
+	.address = address,
+	.usage = VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT,
+    };
     uint32_t buffer_index = 0;
 
     auto graphics_pipeline = vb::builder::GraphicsPipeline{vbc.get()};
@@ -279,6 +317,71 @@ int main(int argc, char** argv) {
 
     graphics_pipeline.create(&rendering_info, VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT, {layout});
     VB_ASSERT(graphics_pipeline.all_valid());
+
+    auto comp_image = vb::builder::Image(vbc.get());
+    comp_image.create({vbc->swapchain_extent.width, vbc->swapchain_extent.height, 1},
+	    VK_FORMAT_R16G16B16_SFLOAT);
+    VB_ASSERT(comp_image.all_valid());
+
+    VkDescriptorSetLayoutBinding compute_binding {
+	.binding = 0,
+	.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+	.descriptorCount = 1,
+	.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+    };
+    VkDescriptorSetLayoutCreateInfo compute_layout_info {
+	.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+	.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT,
+	.bindingCount = 1,
+	.pBindings = &compute_binding,
+    };
+    VkDescriptorSetLayout compute_dlayout;
+    VB_ASSERT(vkCreateDescriptorSetLayout(vbc->device, &compute_layout_info, nullptr, &compute_dlayout) == VK_SUCCESS);
+
+    size_t compute_dlayout_size = 0;
+    vkGetDescriptorSetLayoutSizeEXT(vbc->device, compute_dlayout, &compute_dlayout_size);
+    compute_dlayout_size = aligned_size(compute_dlayout_size, descriptor_buffer_prop.descriptorBufferOffsetAlignment);
+    size_t cbinding_offset = 0;
+    vkGetDescriptorSetLayoutBindingOffsetEXT(vbc->device, compute_dlayout, 0, &cbinding_offset);
+    auto cdescriptor_buffer = vb::builder::Buffer(vbc.get());
+    descriptor_buffer.create(1*vbc->swapchain_extent.width*vbc->swapchain_extent.height*4*compute_dlayout_size, VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    // VB_ASSERT(descriptor_buffer.all_valid());
+    char* cbuffer_data = (char*)cdescriptor_buffer.info.pMappedData;
+    VkDescriptorImageInfo cimage_info {
+	.imageView = comp_image.image_view,
+	.imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+    };
+    VkDescriptorGetInfoEXT cimage_desc_info {
+	.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT,
+	.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+	.data {
+	    .pCombinedImageSampler = &cimage_info,
+	},
+    };
+    vkGetDescriptorEXT(vbc->device, &cimage_desc_info, descriptor_buffer_prop.storageImageDescriptorSize, cbuffer_data+0 * compute_dlayout_size + cbinding_offset);
+    VkBufferDeviceAddressInfo caddr_info {
+	.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+	.buffer = cdescriptor_buffer.buffer,
+    };
+    auto caddress = vkGetBufferDeviceAddress(vbc->device, &caddr_info);
+    VkDescriptorBufferBindingInfoEXT cbinding_info = {
+	.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT,
+	.address = address,
+	.usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT,
+    };
+    uint32_t cbuffer_index = 0;
+
+    VkPipelineLayoutCreateInfo compute_layout_inf {
+	.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+	.setLayoutCount = 1,
+	.pSetLayouts = &compute_dlayout, 
+    };
+    VkPipelineLayout compute_layout;
+    vkCreatePipelineLayout(vbc->device, &compute_layout_inf, nullptr, &compute_layout);
+    auto comp_shader = vb::create::shader_module(vbc->device, "../shaders/grad.comp.spv");
+    VB_ASSERT(comp_shader);
+    auto compute_pipeline = vb::create::compute_pipeline(vbc->device, compute_layout, comp_shader);
+    vkDestroyShaderModule(vbc->device, comp_shader, nullptr);
 
     bool running = true;
     SDL_Event event;
@@ -322,7 +425,12 @@ int main(int argc, char** argv) {
 	    {.color = {0.0f, 0.0f, 0.0f, 1.0f}},
 	    {.depthStencil = {1.0f, 0}},
 	};
-	vb::sync::transition_image(frame->cmd_buffer, vbc->swapchain_images[image_index], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+	vb::sync::transition_image(frame->cmd_buffer, vbc->swapchain_images[image_index], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+	vkCmdBindPipeline(frame->cmd_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute_pipeline);
+	vkCmdBindDescriptorBuffersEXT(frame->cmd_buffer, 1, &cbinding_info);
+	vkCmdSetDescriptorBufferOffsetsEXT(frame->cmd_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute_layout, 0, 1, &cbuffer_index, &cbinding_offset);
+	vkCmdDispatch(frame->cmd_buffer, ceil(vbc->swapchain_extent.width/16.0), ceil(vbc->swapchain_extent.height/16.0), 1);
+	vb::sync::transition_image(frame->cmd_buffer, vbc->swapchain_images[image_index], VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 	vb::sync::transition_image(frame->cmd_buffer, depth_image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 	VkRenderingAttachmentInfo color_info = {
 	    .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
@@ -355,8 +463,8 @@ int main(int argc, char** argv) {
 	VkRect2D scissor {{0,0}, vbc->swapchain_extent};
 	vkCmdSetScissor(frame->cmd_buffer, 0, 1, &scissor);
 
-	descriptor_builder.vkCmdBindDescriptorBuffersEXT(frame->cmd_buffer, 1, &texture_binding);
-	descriptor_builder.vkCmdSetDescriptorBufferOffsetsEXT(frame->cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline.layout, 0, 1, &buffer_index, &texture_descriptor_buffer.binding_offset);
+	vkCmdBindDescriptorBuffersEXT(frame->cmd_buffer, 1, &binding_info);
+	vkCmdSetDescriptorBufferOffsetsEXT(frame->cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline.layout, 0, 1, &buffer_index, &binding_offset);
 	// glm::mat4 model = glm::mat4(1);
 	// model = glm::rotate(model, glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 	glm::mat4 view = glm::lookAt(glm::vec3(2.0f), glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
@@ -421,6 +529,6 @@ int main(int argc, char** argv) {
     texture.clean();
     vkDestroySampler(vbc->device, sampler, nullptr);
     vkDestroyDescriptorSetLayout(vbc->device, layout, nullptr);
-    texture_descriptor_buffer.buffer.clean();
+    descriptor_buffer.clean();
     depth_image.clean();
 }
