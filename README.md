@@ -11,4 +11,4 @@ Nevertheless, for sanity's sake I had to make some assumption about creating VkI
 - `VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU` is first choice for GPU. Falls back to first GPU available in array if there's no discrete GPU.
 - Features that VkDevice always tries to be created with are `synchronization2`, `separateDepthStencilLayouts`, `bufferDeviceAddress`.
 - `vb::Context::Info.surface_format` defaults to `VK_FORMAT_B8G8R8A8_SRGB` with `VK_COLOR_SPACE_SRGB_NONLINEAR_KHR`.
-- `vb::Context::Info.present_mode` defaults to `VK_PRESENT_MODE_MAILBOX_KHR` and falls back to `VK_PRESENT_MODE_FIFO_KHR`.
+- `vb::Context::Info.present_mode` defaults to `VK_PRESENT_MODE_IMMEDIATE_KHR` and falls back to `VK_PRESENT_MODE_FIFO_KHR`.

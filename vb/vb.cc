@@ -5,7 +5,7 @@
 #include <SDL3/SDL_vulkan.h>
 #include <unistd.h>
 #include <vulkan/vulkan_core.h>
-#include <vb.h>
+#include <vb.hh>
 
 namespace vb::fill {
     VkCommandBufferAllocateInfo cmd_buffer_allocate_info(VkCommandPool pool, uint32_t count) {

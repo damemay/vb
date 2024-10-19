@@ -1,18 +1,11 @@
 #pragma once
 
-#define GLM_FORCE_RADIANS
-#define GLM_ENABLE_EXPERIMENTAL
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
 #include <string>
 #include <functional>
-#include <deque>
 #include <optional>
 #include <span>
 #include <vulkan/vulkan_core.h>
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtx/transform.hpp>
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
@@ -32,16 +25,6 @@ namespace vb {
     static inline void log(const std::string& buf) {
 	fprintf(stderr, "vor: %s\n", buf.c_str());
     }
-
-    struct DeletionQueue {
-	std::deque<std::function<void()>> deletors;
-	void push(std::function<void()>&& fn) { deletors.push_back(fn); }
-	void flush() {
-	    for(auto i = deletors.rbegin(); i != deletors.rend(); i++)
-		(*i)();
-	    deletors.clear();
-	}
-    };
 }
 
 namespace vb {
@@ -324,7 +307,8 @@ namespace vb::builder {
 	    std::optional<VkPipeline> pipeline {std::nullopt};
 	    bool all_valid() {return layout.has_value() && pipeline.has_value();}
 
-	    void create(VkRenderPass render_pass, uint32_t subpass_index, std::vector<VkDescriptorSetLayout> descriptor_layouts = {});
+	    void create(void* pNext = nullptr, std::vector<VkDescriptorSetLayout> descriptor_layouts = {});
+	    void create(VkRenderPass render_pass = nullptr, uint32_t subpass_index = 0, std::vector<VkDescriptorSetLayout> descriptor_layouts = {});
 	    void clean();
     };
 }

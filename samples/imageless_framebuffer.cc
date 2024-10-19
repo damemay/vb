@@ -1,7 +1,11 @@
+#include <vbc.h>
+#define GLM_FORCE_RADIANS
+#define GLM_ENABLE_EXPERIMENTAL
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include <SDL3/SDL_events.h>
-#include <memory>
-#include <vb.h>
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/transform.hpp>
+#include <vector>
 #include <vulkan/vulkan_core.h>
 #include <stb/stb_image.h>
 
@@ -18,67 +22,84 @@ struct PushConstants {
     VkDeviceAddress vertex_buffer;
 };
 
+struct DispatchData {
+    VBBuffer* staging_buffer;
+    size_t vertices_size;
+    VBBuffer* vertex_buffer;
+    size_t indices_size;
+    VBBuffer* index_buffer;
+};
+
+void dispatch(VkCommandBuffer cmd, void* data) {
+    DispatchData* d = (DispatchData*)data;
+    VkBufferCopy copy = { .size = d->vertices_size };
+    vkCmdCopyBuffer(cmd, d->staging_buffer->buffer, d->vertex_buffer->buffer, 1, &copy);
+    VkBufferCopy copy2 = { .srcOffset = d->vertices_size, .size = d->indices_size };
+    vkCmdCopyBuffer(cmd, d->staging_buffer->buffer, d->index_buffer->buffer, 1, &copy2);
+}
+
 struct Rectangle {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
-    vb::builder::Buffer vertex_buffer;
-    vb::builder::Buffer index_buffer;
+    VBBuffer* vertex_buffer;
+    VBBuffer* index_buffer;
     VkDeviceAddress vertex_buffer_address;
 
-    Rectangle(vb::Context* context, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
-	: vertex_buffer{context}, index_buffer{context}, vertices{vertices}, indices{indices} {
+    Rectangle(VBContext* context, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices): vertices{vertices}, indices{indices} {
 	    const size_t vertices_size = sizeof(Vertex) * vertices.size();
-	    vertex_buffer.create(vertices_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT 
+	    vertex_buffer = vb_new_buffer(context, vertices_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT 
 		    | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 		    VMA_MEMORY_USAGE_GPU_ONLY);
-	    VB_ASSERT(vertex_buffer.all_valid());
+	    VB_ASSERT(vertex_buffer);
 	    VkBufferDeviceAddressInfo address = {
     	        .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-    	        .buffer = vertex_buffer.buffer.value(),
+    	        .buffer = vertex_buffer->buffer,
     	    };
     	    vertex_buffer_address = vkGetBufferDeviceAddress(context->device, &address);
-
 	    const size_t indices_size = sizeof(uint32_t) * indices.size();
-	    index_buffer.create(indices_size, VK_BUFFER_USAGE_INDEX_BUFFER_BIT
+	    index_buffer = vb_new_buffer(context, indices_size, VK_BUFFER_USAGE_INDEX_BUFFER_BIT
 		    | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-	    VB_ASSERT(index_buffer.all_valid());
+	    VB_ASSERT(index_buffer);
 
-	    auto staging_buffer = vb::builder::Buffer{context};
-    	    staging_buffer.create(vertices_size + indices_size,
+	    auto staging_buffer = vb_new_buffer(context, vertices_size + indices_size,
 		    VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
-	    VB_ASSERT(staging_buffer.all_valid());
-    	    memcpy(staging_buffer.info->pMappedData, vertices.data(), vertices_size);
-    	    memcpy((char*)(staging_buffer.info->pMappedData)+vertices_size, indices.data(),
-		    indices_size);
-    	    context->submit_quick_command([&](VkCommandBuffer cmd) {
-    	        VkBufferCopy copy = { .size = vertices_size };
-    	        vkCmdCopyBuffer(cmd, staging_buffer.buffer.value(), vertex_buffer.buffer.value(), 1, &copy);
-    	        VkBufferCopy copy2 = { .srcOffset = vertices_size, .size = indices_size };
-    	        vkCmdCopyBuffer(cmd, staging_buffer.buffer.value(), index_buffer.buffer.value(), 1, &copy2);
-    	    });
-    	    staging_buffer.clean();
+	    VB_ASSERT(staging_buffer);
+    	    memcpy(staging_buffer->info.pMappedData, vertices.data(), vertices_size);
+    	    memcpy((char*)(staging_buffer->info.pMappedData)+vertices_size, indices.data(), indices_size);
+	    DispatchData data = {staging_buffer, vertices_size, vertex_buffer, indices_size, index_buffer};
+	    vb_dispatch_command(context, dispatch, &data);
+	    vb_free_buffer(staging_buffer);
     }
 };
 
 int main(int argc, char** argv) {
-    VkPhysicalDeviceFeatures vk10features { .samplerAnisotropy = VK_TRUE };
-    VkPhysicalDeviceVulkan12Features vk12features { .imagelessFramebuffer = VK_TRUE };
-    auto info = vb::Context::Info {
+    VkPhysicalDeviceFeatures vk10 { 
+	.samplerAnisotropy = VK_TRUE,
+    };
+    VkPhysicalDeviceVulkan12Features vk12 {
+	.imagelessFramebuffer = VK_TRUE,
+	.separateDepthStencilLayouts = VK_TRUE,
+	.bufferDeviceAddress = VK_TRUE,
+    };
+    VkPhysicalDeviceVulkan13Features vk13 {
+	.synchronization2 = VK_TRUE,
+    };
+    VBContextInfo info {
 	.title = "vbc",
 	.width = 800,
 	.height = 600,
-	.vk10features = vk10features,
-	.vk12features = vk12features,
+	.vk10features = vk10,
+	.vk12features = vk12,
+	.vk13features = vk13,
     };
-    auto vbc = std::make_unique<vb::Context>(info);
+    auto vbc = vb_new_context(&info);
 
     int tw, th, tc;
     stbi_uc* data = stbi_load("../textures/texture.jpg", &tw, &th, &tc, STBI_rgb_alpha);
     VB_ASSERT(data);
-    auto texture = vb::builder::Image(vbc.get());
     VkExtent3D size = {(uint32_t)tw,(uint32_t)th,1};
-    texture.create(data, size);
-    VB_ASSERT(texture.all_valid());
+    auto texture = vb_new_image_from_data(vbc, data, size, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, false);
+    VB_ASSERT(texture);
 
     VkPhysicalDeviceProperties pdev_prop{};
     vkGetPhysicalDeviceProperties(vbc->physical_device, &pdev_prop);
@@ -110,62 +131,101 @@ int main(int argc, char** argv) {
     	{{-0.5f, 0.5f,  0.0f}, 1.0f, {1.0f, 1.0f, 1.0f}, 1.0f, {1.0f, 1.0f, 0.0f, 1.0f}}
     };
     const std::vector<uint32_t> indices = {0,1,2,2,3,0};
-    Rectangle rectangle {vbc.get(), vertices, indices};
+    Rectangle rectangle {vbc, vertices, indices};
     const std::vector<Vertex> vertices2 = {
     	{{-0.5f, -0.5f, -0.5f}, 1.0f, {1.0f, 1.0f, 1.0f}, 0.0f, {1.0f, 0.0f, 0.0f, 1.0f}},
 	{{0.5f,  -0.5f, -0.5f}, 0.0f, {1.0f, 1.0f, 1.0f}, 0.0f, {0.0f, 1.0f, 0.0f, 1.0f}},
     	{{0.5f,  0.5f,  -0.5f}, 0.0f, {1.0f, 1.0f, 1.0f}, 1.0f, {0.0f, 0.0f, 1.0f, 1.0f}},
     	{{-0.5f, 0.5f,  -0.5f}, 1.0f, {1.0f, 1.0f, 1.0f}, 1.0f, {1.0f, 1.0f, 0.0f, 1.0f}}
     };
-    Rectangle rectangle2 {vbc.get(), vertices2, indices};
+    Rectangle rectangle2 {vbc, vertices2, indices};
 
-    VkDescriptorSetLayoutBinding binding {
-	.binding = 0,
-	.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-	.descriptorCount = 1,
-	.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+    // VkDescriptorSetLayoutBinding binding {
+    //     .binding = 0,
+    //     .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+    //     .descriptorCount = 1,
+    //     .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+    // };
+    // VkDescriptorSetLayoutCreateInfo layout_info {
+    //     .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+    //     .bindingCount = 1,
+    //     .pBindings = &binding,
+    // };
+    // VkDescriptorSetLayout layout;
+    // VB_ASSERT(vkCreateDescriptorSetLayout(vbc->device, &layout_info, nullptr, &layout) == VK_SUCCESS);
+    // auto descriptor_builder = vb::builder::Descriptor(vbc.get());
+    // vb::builder::Descriptor::Ratio sizes[1] {{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2}};
+    // descriptor_builder.create(sizes);
+    // auto set = descriptor_builder.allocate(layout);
+    // VB_ASSERT(set.has_value());
+
+    // VkDescriptorImageInfo image_info {
+    //     .sampler = sampler,
+    //     .imageView = texture.image_view.value(),
+    //     .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    // };
+    // VkWriteDescriptorSet descriptor_write {
+    //     .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+    //     .dstSet = set.value(),
+    //     .dstBinding = 0,
+    //     .dstArrayElement = 0,
+    //     .descriptorCount = 1,
+    //     .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+    //     .pImageInfo = &image_info,
+    // };
+    // vkUpdateDescriptorSets(vbc->device, 1, &descriptor_write, 0, nullptr);
+
+    VkPipelineInputAssemblyStateCreateInfo input_assembly = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+        .primitiveRestartEnable = VK_FALSE,
     };
-    VkDescriptorSetLayoutCreateInfo layout_info {
-	.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-	.bindingCount = 1,
-	.pBindings = &binding,
+    VkPipelineRasterizationStateCreateInfo rasterization = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .cullMode = VK_CULL_MODE_BACK_BIT,
+        .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+        .lineWidth = 1.0f,
     };
-    VkDescriptorSetLayout layout;
-    VB_ASSERT(vkCreateDescriptorSetLayout(vbc->device, &layout_info, nullptr, &layout) == VK_SUCCESS);
-    auto descriptor_builder = vb::builder::Descriptor(vbc.get());
-    vb::builder::Descriptor::Ratio sizes[1] {{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2}};
-    descriptor_builder.create(sizes);
-    auto set = descriptor_builder.allocate(layout);
-    VB_ASSERT(set.has_value());
-
-    VkDescriptorImageInfo image_info {
-	.sampler = sampler,
-	.imageView = texture.image_view.value(),
-	.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    VkPipelineMultisampleStateCreateInfo multisample = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+        .sampleShadingEnable = VK_FALSE,
+        .minSampleShading = 1.0f,
     };
-    VkWriteDescriptorSet descriptor_write {
-	.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-	.dstSet = set.value(),
-	.dstBinding = 0,
-	.dstArrayElement = 0,
-	.descriptorCount = 1,
-	.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-	.pImageInfo = &image_info,
+    VkPipelineDepthStencilStateCreateInfo depth_stencil = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+	.depthTestEnable = VK_TRUE,
+	.depthWriteEnable = VK_TRUE,
+        .depthCompareOp = VK_COMPARE_OP_LESS,
+        .minDepthBounds = 0.0f,
+        .maxDepthBounds = 1.0f,
     };
-    vkUpdateDescriptorSets(vbc->device, 1, &descriptor_write, 0, nullptr);
 
-    auto graphics_pipeline = vb::builder::GraphicsPipeline{vbc.get()};
-    graphics_pipeline.set_front_face(VK_FRONT_FACE_COUNTER_CLOCKWISE);
-    graphics_pipeline.enable_depth_test();
+    auto vert_sh = vb_create_shader_module(vbc->device, "../shaders/full_vert.vert.spv");
+    VB_ASSERT(vert_sh);
+    auto frag_sh = vb_create_shader_module(vbc->device, "../shaders/triangle.frag.spv");
+    VB_ASSERT(frag_sh);
 
-    graphics_pipeline.add_shader("../shaders/full_vert.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-    graphics_pipeline.add_shader("../shaders/textured.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-    graphics_pipeline.add_push_constant(sizeof(PushConstants), VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo shaders[2] = {
+	{
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+	    .stage = VK_SHADER_STAGE_VERTEX_BIT,
+	    .module = vert_sh,
+	    .pName = "main",
+	},
+	{
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+	    .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+	    .module = frag_sh,
+	    .pName = "main",
+	},
+    };
 
-    auto depth_image = vb::builder::Image(vbc.get());
-    depth_image.create({vbc->swapchain_extent.width, vbc->swapchain_extent.height, 1},
-	    VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
-    VB_ASSERT(depth_image.all_valid());
+    VkPushConstantRange range = {VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants)};
+
+    auto depth_image = vb_new_image(vbc, {vbc->swapchain_extent.width, vbc->swapchain_extent.height, 1}, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, false);
+    VB_ASSERT(depth_image);
 
     VkAttachmentDescription color_attachment {
 	.format = vbc->swapchain_format,
@@ -212,9 +272,58 @@ int main(int argc, char** argv) {
     };
     VkRenderPass render_pass;
     VB_ASSERT(vkCreateRenderPass(vbc->device, &render_pass_info, nullptr, &render_pass) == VK_SUCCESS);
-
-    graphics_pipeline.create(render_pass, 0, {layout});
-    VB_ASSERT(graphics_pipeline.all_valid());
+    VkPipelineVertexInputStateCreateInfo vertex_input = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    };
+    VkPipelineViewportStateCreateInfo viewport = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .scissorCount = 1,
+    };
+    VkPipelineColorBlendAttachmentState color_blend_attachment = {
+        .blendEnable = VK_FALSE,
+        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
+    	| VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+    };
+    VkPipelineColorBlendStateCreateInfo color_blend = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .logicOpEnable = VK_FALSE,
+        .logicOp = VK_LOGIC_OP_COPY,
+        .attachmentCount = 1,
+        .pAttachments = &color_blend_attachment,
+    };
+    VkDynamicState states[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo dynamic_state = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        .dynamicStateCount = 2,
+        .pDynamicStates = states,
+    };
+    VkPipelineLayoutCreateInfo pipeline_layout = {
+	.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+	.pushConstantRangeCount = 1,
+	.pPushConstantRanges = &range,
+    };
+    VkPipelineLayout layout;
+    VB_ASSERT(vkCreatePipelineLayout(vbc->device, &pipeline_layout, nullptr, &layout) != VK_SUCCESS);
+    VkGraphicsPipelineCreateInfo pipeline_info = {
+       .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+       .stageCount = 2,
+       .pStages = shaders,
+       .pVertexInputState = &vertex_input,
+       .pInputAssemblyState = &input_assembly,
+       //.pTessellationState = tessellation,
+       .pViewportState = &viewport,
+       .pRasterizationState = &rasterization,
+       .pMultisampleState = &multisample,
+       .pDepthStencilState = &depth_stencil,
+       .pColorBlendState = &color_blend,
+       .pDynamicState = &dynamic_state,
+       .layout = layout,
+       .renderPass = render_pass,
+       .subpass = 0,
+    };
+    VkPipeline pipeline;
+    VB_ASSERT(vkCreateGraphicsPipelines(vbc->device, VK_NULL_HANDLE, 1, &pipeline_info, NULL, &pipeline) != VK_SUCCESS);
 
     VkFramebufferAttachmentImageInfo framebuffer_color_attachment_info {
 	.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_ATTACHMENT_IMAGE_INFO,
@@ -278,12 +387,10 @@ int main(int argc, char** argv) {
 	}
 
 	if(vbc->resize) {
-	    vbc->recreate_swapchain([&](uint32_t,uint32_t) {
-		depth_image.clean();
-		vkDestroyFramebuffer(vbc->device, framebuffer, nullptr);
-	    });
-	    depth_image.create({vbc->swapchain_extent.width, vbc->swapchain_extent.height, 1},
-		VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+	    vb_recreate_swapchain(vbc);
+	    vb_free_image(depth_image);
+	    vkDestroyFramebuffer(vbc->device, framebuffer, nullptr);
+	    depth_image = vb_new_image(vbc, {vbc->swapchain_extent.width, vbc->swapchain_extent.height, 1}, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, false);
 	    VkFramebufferAttachmentImageInfo framebuffer_color_attachment_info {
     	        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_ATTACHMENT_IMAGE_INFO,
     	        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
@@ -324,13 +431,15 @@ int main(int argc, char** argv) {
     	    VB_ASSERT(vkCreateFramebuffer(vbc->device, &framebuffer_info, nullptr, &framebuffer) == VK_SUCCESS);
 	}
 
-	auto frame = vbc->get_current_frame();
+	auto frame = &vbc->frames[vbc->frame_index % VB_MAX_FRAMES];
 	uint32_t image_index = 0;
-	{
-	    auto image = vbc->wait_on_image_reset_fence(frame);
-	    if(!image.has_value()) continue;
-	    image_index = image.value();
+	vkWaitForFences(vbc->device, 1, &frame->render_fence, VK_TRUE, UINT64_MAX);
+	VkResult result = vkAcquireNextImageKHR(vbc->device, vbc->swapchain, UINT64_MAX, frame->image_available_semaphore, VK_NULL_HANDLE, &image_index);
+	if(result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+	    vbc->resize = true;
+	    continue;
 	}
+	vkResetFences(vbc->device, 1, &frame->render_fence);
 
  	vkResetCommandBuffer(frame->cmd_buffer, 0);
  	VkCommandBufferBeginInfo begin {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -340,7 +449,7 @@ int main(int argc, char** argv) {
 	    {.color = {0.0f, 0.0f, 0.0f, 1.0f}},
 	    {.depthStencil = {1.0f, 0}},
 	};
-	VkImageView views[2] = {vbc->swapchain_image_views[image_index], depth_image.image_view.value()};
+	VkImageView views[2] = {vbc->swapchain_image_views[image_index], depth_image->image_view};
 	VkRenderPassAttachmentBeginInfo render_begin_attachments {
 	    .sType = VK_STRUCTURE_TYPE_RENDER_PASS_ATTACHMENT_BEGIN_INFO,
 	    .attachmentCount = 2,
@@ -356,25 +465,25 @@ int main(int argc, char** argv) {
 	    .pClearValues = color,
 	};
 	vkCmdBeginRenderPass(frame->cmd_buffer, &render_begin, VK_SUBPASS_CONTENTS_INLINE);
-	vkCmdBindPipeline(frame->cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline.pipeline.value());
+	vkCmdBindPipeline(frame->cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 	VkViewport viewport {0.0f, 0.0f, (float)vbc->swapchain_extent.width, (float)vbc->swapchain_extent.height};
 	vkCmdSetViewport(frame->cmd_buffer, 0, 1, &viewport);
 	VkRect2D scissor {{0,0}, vbc->swapchain_extent};
 	vkCmdSetScissor(frame->cmd_buffer, 0, 1, &scissor);
 
-	vkCmdBindDescriptorSets(frame->cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline.layout.value(), 0, 1, &set.value(), 0, nullptr);
+	// vkCmdBindDescriptorSets(frame->cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline.layout.value(), 0, 1, &set.value(), 0, nullptr);
 	// glm::mat4 model = glm::mat4(1);
 	// model = glm::rotate(model, glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 	glm::mat4 view = glm::lookAt(glm::vec3(2.0f), glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 	glm::mat4 proj = glm::perspective(glm::radians(45.0f), (float)vbc->swapchain_extent.width/(float)vbc->swapchain_extent.height, 0.1f, 100.0f);
 	proj[1][1] *= -1;
 	auto push_constants = PushConstants{proj * view, rectangle.vertex_buffer_address};
-	vkCmdPushConstants(frame->cmd_buffer, graphics_pipeline.layout.value(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &push_constants);
-	vkCmdBindIndexBuffer(frame->cmd_buffer, rectangle.index_buffer.buffer.value(), 0, VK_INDEX_TYPE_UINT32);
+	vkCmdPushConstants(frame->cmd_buffer, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &push_constants);
+	vkCmdBindIndexBuffer(frame->cmd_buffer, rectangle.index_buffer->buffer, 0, VK_INDEX_TYPE_UINT32);
 	vkCmdDrawIndexed(frame->cmd_buffer, (uint32_t)indices.size(), 2, 0, 0, 0);
 	push_constants = PushConstants{proj * view, rectangle2.vertex_buffer_address};
-	vkCmdPushConstants(frame->cmd_buffer, graphics_pipeline.layout.value(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &push_constants);
-	vkCmdBindIndexBuffer(frame->cmd_buffer, rectangle2.index_buffer.buffer.value(), 0, VK_INDEX_TYPE_UINT32);
+	vkCmdPushConstants(frame->cmd_buffer, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &push_constants);
+	vkCmdBindIndexBuffer(frame->cmd_buffer, rectangle2.index_buffer->buffer, 0, VK_INDEX_TYPE_UINT32);
 	vkCmdDrawIndexed(frame->cmd_buffer, (uint32_t)indices.size(), 2, 0, 0, 0);
 	vkCmdEndRenderPass(frame->cmd_buffer);
 
@@ -419,15 +528,16 @@ int main(int argc, char** argv) {
     vkDeviceWaitIdle(vbc->device);
 
     vkDestroyRenderPass(vbc->device, render_pass, nullptr);
-    graphics_pipeline.clean();
-    rectangle.vertex_buffer.clean();
-    rectangle.index_buffer.clean();
-    rectangle2.vertex_buffer.clean();
-    rectangle2.index_buffer.clean();
-    texture.clean();
+    vkDestroyPipeline(vbc->device, pipeline, nullptr);
+    vkDestroyPipelineLayout(vbc->device, layout, nullptr);
+    vb_free_buffer(rectangle.vertex_buffer);
+    vb_free_buffer(rectangle.index_buffer);
+    vb_free_buffer(rectangle2.vertex_buffer);
+    vb_free_buffer(rectangle2.index_buffer);
+    vb_free_image(texture);
     vkDestroySampler(vbc->device, sampler, nullptr);
-    vkDestroyDescriptorSetLayout(vbc->device, layout, nullptr);
-    descriptor_builder.clean();
-    depth_image.clean();
+    //vkDestroyDescriptorSetLayout(vbc->device, layout, nullptr);
+    //descriptor_builder.clean();
+    vb_free_image(depth_image);
     vkDestroyFramebuffer(vbc->device, framebuffer, nullptr);
 }

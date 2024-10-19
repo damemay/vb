@@ -31,7 +31,7 @@ include_directories(
 )
 
 add_library(${PROJECT_NAME}
-    vb/vb.cc
+    vb/vb.c
 )
 
 if(SAMPLE)

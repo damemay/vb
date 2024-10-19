@@ -1,18 +1,18 @@
 #include <SDL3/SDL_events.h>
 #include <memory>
-#include <vb.h>
+#include <vbc.h>
 #include <vulkan/vulkan_core.h>
 
 int main(int argc, char** argv) {
-    auto info = vb::Context::Info {
+    auto info = VBContextInfo {
 	.title = "vbc",
 	.width = 800,
 	.height = 600,
     };
-    auto vbc = std::make_unique<vb::Context>(info);
-    auto graphics_pipeline = vb::builder::GraphicsPipeline{vbc.get()};
-    graphics_pipeline.add_shader("../shaders/triangle.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-    graphics_pipeline.add_shader("../shaders/triangle.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+    auto vbc = vb_new_context(&info);
+    //auto graphics_pipeline = vb::builder::GraphicsPipeline{vbc.get()};
+    //graphics_pipeline.add_shader("../shaders/triangle.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+    //graphics_pipeline.add_shader("../shaders/triangle.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 
     VkAttachmentDescription color_attachment {
 	.format = vbc->swapchain_format,
@@ -125,5 +125,6 @@ int main(int argc, char** argv) {
     vkDeviceWaitIdle(vbc->device);
 
     vkDestroyRenderPass(vbc->device, render_pass, nullptr);
-    graphics_pipeline.clean();
+    vb_free_context(vbc);
+    //graphics_pipeline.clean();
 }

@@ -1,7 +1,13 @@
+#define GLM_FORCE_RADIANS
+#define GLM_ENABLE_EXPERIMENTAL
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/transform.hpp>
 #include <SDL3/SDL_events.h>
 #include <memory>
-#include <vb.h>
+#include <vector>
+#include <vbc.h>
 #include <format>
 #include <vulkan/vulkan_core.h>
 
@@ -15,57 +21,72 @@ struct PushConstants {
     VkDeviceAddress vertex_buffer;
 };
 
+    struct DispatchData {
+	VBBuffer* staging_buffer;
+	size_t vertices_size;
+	VBBuffer* vertex_buffer;
+	size_t indices_size;
+	VBBuffer* index_buffer;
+    };
+
+    void dispatch(VkCommandBuffer cmd, void* data) {
+	DispatchData* d = (DispatchData*)data;
+	VkBufferCopy copy = { .size = d->vertices_size };
+	vkCmdCopyBuffer(cmd, d->staging_buffer->buffer, d->vertex_buffer->buffer, 1, &copy);
+	VkBufferCopy copy2 = { .srcOffset = d->vertices_size, .size = d->indices_size };
+	vkCmdCopyBuffer(cmd, d->staging_buffer->buffer, d->index_buffer->buffer, 1, &copy2);
+    }
+
 struct Rectangle {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
-    vb::builder::Buffer vertex_buffer;
-    vb::builder::Buffer index_buffer;
+    VBBuffer* vertex_buffer;
+    VBBuffer* index_buffer;
     VkDeviceAddress vertex_buffer_address;
 
-    Rectangle(vb::Context* context, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
-	: vertex_buffer{context}, index_buffer{context}, vertices{vertices}, indices{indices} {
+    Rectangle(VBContext* context, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices): vertices{vertices}, indices{indices} {
 	    const size_t vertices_size = sizeof(Vertex) * vertices.size();
-	    vertex_buffer.create(vertices_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT 
+	    vertex_buffer = vb_new_buffer(context, vertices_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT 
 		    | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 		    VMA_MEMORY_USAGE_GPU_ONLY);
-	    VB_ASSERT(vertex_buffer.all_valid());
+	    VB_ASSERT(vertex_buffer);
 	    VkBufferDeviceAddressInfo address = {
     	        .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-    	        .buffer = vertex_buffer.buffer.value(),
+    	        .buffer = vertex_buffer->buffer,
     	    };
     	    vertex_buffer_address = vkGetBufferDeviceAddress(context->device, &address);
-
 	    const size_t indices_size = sizeof(uint32_t) * indices.size();
-	    index_buffer.create(indices_size, VK_BUFFER_USAGE_INDEX_BUFFER_BIT
+	    index_buffer = vb_new_buffer(context, indices_size, VK_BUFFER_USAGE_INDEX_BUFFER_BIT
 		    | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-	    VB_ASSERT(index_buffer.all_valid());
+	    VB_ASSERT(index_buffer);
 
-	    auto staging_buffer = vb::builder::Buffer{context};
-    	    staging_buffer.create(vertices_size + indices_size,
+	    auto staging_buffer = vb_new_buffer(context, vertices_size + indices_size,
 		    VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
-	    VB_ASSERT(staging_buffer.all_valid());
-    	    memcpy(staging_buffer.info->pMappedData, vertices.data(), vertices_size);
-    	    memcpy((char*)(staging_buffer.info->pMappedData)+vertices_size, indices.data(),
-		    indices_size);
-    	    context->submit_quick_command([&](VkCommandBuffer cmd) {
-    	        VkBufferCopy copy = { .size = vertices_size };
-    	        vkCmdCopyBuffer(cmd, staging_buffer.buffer.value(), vertex_buffer.buffer.value(), 1, &copy);
-    	        VkBufferCopy copy2 = { .srcOffset = vertices_size, .size = indices_size };
-    	        vkCmdCopyBuffer(cmd, staging_buffer.buffer.value(), index_buffer.buffer.value(), 1, &copy2);
-    	    });
-    	    staging_buffer.clean();
+	    VB_ASSERT(staging_buffer);
+    	    memcpy(staging_buffer->info.pMappedData, vertices.data(), vertices_size);
+    	    memcpy((char*)(staging_buffer->info.pMappedData)+vertices_size, indices.data(), indices_size);
+	    DispatchData data = {staging_buffer, vertices_size, vertex_buffer, indices_size, index_buffer};
+	    vb_dispatch_command(context, dispatch, &data);
+	    vb_free_buffer(staging_buffer);
     }
 };
 
 int main(int argc, char** argv) {
-    auto info = vb::Context::Info {
+    VkPhysicalDeviceVulkan12Features vk12 {
+	.separateDepthStencilLayouts = VK_TRUE,
+	.bufferDeviceAddress = VK_TRUE,
+    };
+    VkPhysicalDeviceVulkan13Features vk13 {
+	.synchronization2 = VK_TRUE,
+    };
+    VBContextInfo info {
 	.title = "vbc",
 	.width = 800,
 	.height = 600,
+	.vk12features = vk12,
+	.vk13features = vk13,
     };
-    auto vbc = std::make_unique<vb::Context>(info);
-
-    for(auto& e: vbc->get_enabled_extensions()) vb::log(std::format("{}",e));
+    auto vbc = vb_new_context(&info);
 
     const std::vector<Vertex> vertices = {
     	{{-0.5f, -0.5f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
@@ -74,14 +95,14 @@ int main(int argc, char** argv) {
     	{{-0.5f, 0.5f, 0.0f, 1.0f}, {1.0f, 1.0f, 0.0f, 1.0f}}
     };
     const std::vector<uint32_t> indices = {0,1,2,2,3,0};
-    Rectangle rectangle {vbc.get(), vertices, indices};
+    Rectangle rectangle {vbc, vertices, indices};
     const std::vector<Vertex> vertices2 = {
     	{{-0.5f, -0.5f, -0.5f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
 	{{0.5f, -0.5f, -0.5f, 1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
     	{{0.5f, 0.5f, -0.5f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
     	{{-0.5f, 0.5f, -0.5f, 1.0f}, {1.0f, 1.0f, 0.0f, 1.0f}}
     };
-    Rectangle rectangle2 {vbc.get(), vertices2, indices};
+    Rectangle rectangle2 {vbc, vertices2, indices};
 
     auto graphics_pipeline = vb::builder::GraphicsPipeline{vbc.get()};
     graphics_pipeline.set_front_face(VK_FRONT_FACE_COUNTER_CLOCKWISE);
@@ -91,10 +112,8 @@ int main(int argc, char** argv) {
     graphics_pipeline.add_shader("../shaders/triangle.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
     graphics_pipeline.add_push_constant(sizeof(PushConstants), VK_SHADER_STAGE_VERTEX_BIT);
 
-    auto depth_image = vb::builder::Image(vbc.get());
-    depth_image.create({vbc->swapchain_extent.width, vbc->swapchain_extent.height, 1},
-	    VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
-    VB_ASSERT(depth_image.all_valid());
+    auto depth_image = vb_new_image(vbc, {vbc->swapchain_extent.width, vbc->swapchain_extent.height, 1}, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, false);
+    VB_ASSERT(depth_image);
 
     VkAttachmentDescription color_attachment {
 	.format = vbc->swapchain_format,
