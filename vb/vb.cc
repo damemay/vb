@@ -380,7 +380,7 @@ namespace vb::builder {
 	push_constants.push_back(range);
     }
 
-    void GraphicsPipeline::create(VkRenderPass render_pass, uint32_t subpass_index, std::vector<VkDescriptorSetLayout> descriptor_layouts) {
+    void GraphicsPipeline::create(void* pNext, VkRenderPass render_pass, uint32_t subpass_index, std::vector<VkDescriptorSetLayout> descriptor_layouts) {
 	VkPipelineVertexInputStateCreateInfo vertex_input = {
 	    .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         };
@@ -417,6 +417,7 @@ namespace vb::builder {
 	if(vkCreatePipelineLayout(ctx->device, &pipeline_layout, nullptr, &layout) != VK_SUCCESS) return;
         VkGraphicsPipelineCreateInfo info = {
 	   .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+	   .pNext = pNext,
     	   .stageCount = (uint32_t)shader_stages.size(),
     	   .pStages = shader_stages.data(),
     	   .pVertexInputState = &vertex_input,
@@ -438,6 +439,14 @@ namespace vb::builder {
 	    vkDestroyShaderModule(ctx->device, shader, nullptr);
 	    shader_modules.clear();
 	}
+    }
+
+    void GraphicsPipeline::create(VkRenderPass render_pass, uint32_t subpass_index, std::vector<VkDescriptorSetLayout> descriptor_layouts) {
+	create(nullptr, render_pass, subpass_index, descriptor_layouts);
+    }
+
+    void GraphicsPipeline::create(void* pNext, std::vector<VkDescriptorSetLayout> descriptor_layouts) {
+	create(pNext, nullptr, 0, descriptor_layouts);
     }
 
     void GraphicsPipeline::clean() {

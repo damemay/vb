@@ -324,7 +324,9 @@ namespace vb::builder {
 	    VkPipeline pipeline {VK_NULL_HANDLE};
 	    bool all_valid() {return layout&&pipeline;}
 
-	    void create(VkRenderPass render_pass, uint32_t subpass_index, std::vector<VkDescriptorSetLayout> descriptor_layouts = {});
+	    void create(void* pNext, VkRenderPass render_pass, uint32_t subpass_index, std::vector<VkDescriptorSetLayout> descriptor_layouts);
+	    void create(VkRenderPass render_pass, uint32_t subpass_index = 0, std::vector<VkDescriptorSetLayout> descriptor_layouts = {});
+	    void create(void* pNext, std::vector<VkDescriptorSetLayout> descriptor_layouts = {});
 	    void clean();
     };
 }

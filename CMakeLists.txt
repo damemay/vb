@@ -39,6 +39,7 @@ if(SAMPLE)
     add_library(STB ext/stb.cc)
     set(WORKING_SAMPLES 
 	samples/imageless_framebuffer.cc
+	samples/dynamic_rendering.cc
     )
     foreach(file ${WORKING_SAMPLES})
         get_filename_component(sample ${file} NAME_WLE)
