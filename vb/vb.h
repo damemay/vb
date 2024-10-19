@@ -181,6 +181,7 @@ namespace vb {
 
 namespace vb::sync {
     void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
+    void blit_image(VkCommandBuffer cmd, VkImage source, VkImage dest, VkExtent3D src_extent, VkExtent3D dst_extent, VkImageAspectFlags aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT);
 }
 
 namespace vb::fill {

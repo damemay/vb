@@ -42,6 +42,7 @@ if(SAMPLE)
 	samples/dynamic_rendering.cc
 	samples/push_descriptors.cc
 	samples/descriptor_buffers.cc
+	samples/compute.cc
     )
     foreach(file ${WORKING_SAMPLES})
         get_filename_component(sample ${file} NAME_WLE)

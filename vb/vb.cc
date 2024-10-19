@@ -101,6 +101,33 @@ namespace vb::sync {
 	};
 	vkCmdPipelineBarrier2(cmd, &dependency);
     }
+
+    void blit_image(VkCommandBuffer cmd, VkImage source, VkImage dest, VkExtent3D src_extent, VkExtent3D dst_extent, VkImageAspectFlags aspect_mask) {
+	VkImageBlit2 region = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_BLIT_2,
+	    .srcSubresource = {
+		.aspectMask = aspect_mask,
+		.layerCount = 1,
+	    },
+	    .srcOffsets = {{}, {.x = (int32_t)src_extent.width, .y = (int32_t)src_extent.height, .z = (int32_t)src_extent.depth}},
+	    .dstSubresource = {
+		.aspectMask = aspect_mask,
+		.layerCount = 1,
+	    },
+	    .dstOffsets = {{}, {.x = (int32_t)dst_extent.width, .y = (int32_t)dst_extent.height, .z = (int32_t)dst_extent.depth}},
+	};
+	VkBlitImageInfo2 blit = {
+	    .sType = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2,
+	    .srcImage = source,
+	    .srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+	    .dstImage = dest,
+	    .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	    .regionCount = 1,
+	    .pRegions = &region,
+	    .filter = VK_FILTER_LINEAR,
+	};
+	vkCmdBlitImage2(cmd, &blit);
+    }
 }
 
 namespace vb::create {
@@ -326,9 +353,7 @@ namespace vb::builder {
 		.layerCount = 1,
     	    },
     	};
-	VkImageView temp_image_view;
-	if(vkCreateImageView(ctx->device, &info, nullptr, &temp_image_view) != VK_SUCCESS) return;
-	image_view = temp_image_view;
+	if(vkCreateImageView(ctx->device, &info, nullptr, &image_view) != VK_SUCCESS) return;
     }
 
     void Image::create(void* data, VkExtent3D extent, VkFormat format, VkImageUsageFlags usage, bool mipmap) {
