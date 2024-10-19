@@ -12,3 +12,6 @@ Nevertheless, for sanity's sake I had to make some assumption about creating VkI
 - At `VK_API_VERSION_1_3`, device is always created with these features: `synchronization2`, `separateDepthStencilLayouts`, `bufferDeviceAddress`.
 - `vb::Context::Info.surface_format` defaults to `VK_FORMAT_B8G8R8A8_SRGB` with `VK_COLOR_SPACE_SRGB_NONLINEAR_KHR`.
 - `vb::Context::Info.present_mode` defaults to `VK_PRESENT_MODE_MAILBOX_KHR` and falls back to `VK_PRESENT_MODE_FIFO_KHR`.
+
+
+Not all samples are updated to newest `vb.h`. Compilable and working samples are listed in `CMakeLists.txt` as `${WORKING_SAMPLES}`.
