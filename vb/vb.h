@@ -207,7 +207,7 @@ namespace vb::create {
     [[nodiscard]] VkPipeline compute_pipeline(VkDevice device,
 	    VkPipelineLayout layout,
 	    VkShaderModule shader_module);
-    [[nodiscard]] std::optional<VkShaderModule> shader_module(VkDevice device, const char* path);
+    [[nodiscard]] VkShaderModule shader_module(VkDevice device, const char* path);
 }
 
 namespace vb::builder {
@@ -220,7 +220,7 @@ namespace vb::builder {
 
 	[[nodiscard]] Descriptor(Context* context): ContextDependant{context} {}
 	void create(std::span<Ratio> pool_ratios, uint32_t init_sets = 1000, VkDescriptorPoolCreateFlags flags = 0);
-	[[nodiscard]] std::optional<VkDescriptorSet> allocate(VkDescriptorSetLayout layout, void* next = nullptr);
+	[[nodiscard]] VkDescriptorSet allocate(VkDescriptorSetLayout layout, void* next = nullptr);
 	void flush();
 	void clean();
 
@@ -230,15 +230,15 @@ namespace vb::builder {
     	    std::vector<VkDescriptorPool> full_pools;
     	    std::vector<VkDescriptorPool> ready_pools;
 
-	    std::optional<VkDescriptorPool> get_pool();
-	    std::optional<VkDescriptorPool> create_pool(std::span<Ratio> pool_ratios, uint32_t init_sets, VkDescriptorPoolCreateFlags flags = 0);
+	    VkDescriptorPool get_pool();
+	    VkDescriptorPool create_pool(std::span<Ratio> pool_ratios, uint32_t init_sets, VkDescriptorPoolCreateFlags flags = 0);
     };
 
     struct Buffer: public ContextDependant, public OptionalValidator {
-	std::optional<VkBuffer> buffer {std::nullopt};
-	std::optional<VmaAllocation> allocation {std::nullopt};
-	std::optional<VmaAllocationInfo> info {std::nullopt};
-	bool all_valid() {return buffer.has_value() && allocation.has_value() && info.has_value();}
+	VkBuffer buffer {VK_NULL_HANDLE};
+	VmaAllocation allocation {VK_NULL_HANDLE};
+	VmaAllocationInfo info;
+	bool all_valid() {return buffer&&allocation;}
 
 	[[nodiscard]] Buffer(Context* context): ContextDependant{context} {}
 	void create(const size_t size, VkBufferCreateFlags usage, VmaMemoryUsage mem_usage);
@@ -246,10 +246,10 @@ namespace vb::builder {
     };
 
     struct Image: public ContextDependant, public OptionalValidator {
-	std::optional<VkImage> image {std::nullopt};
-	std::optional<VkImageView> image_view {std::nullopt};
-	std::optional<VmaAllocation> allocation {std::nullopt};
-	bool all_valid() {return image.has_value() && image_view.has_value() && allocation.has_value();}
+	VkImage image {VK_NULL_HANDLE};
+	VkImageView image_view {VK_NULL_HANDLE};
+	VmaAllocation allocation {VK_NULL_HANDLE};
+	bool all_valid() {return image&&image_view&&allocation;}
 
 	VkExtent3D extent;
 	VkFormat format;
@@ -320,9 +320,9 @@ namespace vb::builder {
 	    inline void enable_stencil_test() { depth_stencil.stencilTestEnable = VK_TRUE; }
 	    inline void set_stencil_operations(VkStencilOpState front, VkStencilOpState back) { depth_stencil.front = front; depth_stencil.back = back; }
 
-	    std::optional<VkPipelineLayout> layout {std::nullopt};
-	    std::optional<VkPipeline> pipeline {std::nullopt};
-	    bool all_valid() {return layout.has_value() && pipeline.has_value();}
+	    VkPipelineLayout layout {VK_NULL_HANDLE};
+	    VkPipeline pipeline {VK_NULL_HANDLE};
+	    bool all_valid() {return layout&&pipeline;}
 
 	    void create(VkRenderPass render_pass, uint32_t subpass_index, std::vector<VkDescriptorSetLayout> descriptor_layouts = {});
 	    void clean();

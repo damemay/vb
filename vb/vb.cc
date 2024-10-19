@@ -104,9 +104,9 @@ namespace vb::sync {
 }
 
 namespace vb::create {
-    std::optional<VkShaderModule> shader_module(VkDevice device, const char* path) {
+    VkShaderModule shader_module(VkDevice device, const char* path) {
 	std::ifstream file {path, std::ios::ate | std::ios::binary};
-	if(!file.is_open()) return std::nullopt;
+	if(!file.is_open()) return VK_NULL_HANDLE;
 	size_t size = file.tellg();
 	std::vector<uint32_t> buffer (size / sizeof(uint32_t));
 	file.seekg(0);
@@ -118,7 +118,7 @@ namespace vb::create {
 	    .pCode = buffer.data(),
         };
         VkShaderModule shader;
-        if(vkCreateShaderModule(device, &info, NULL, &shader) != VK_SUCCESS) return std::nullopt;
+        if(vkCreateShaderModule(device, &info, NULL, &shader) != VK_SUCCESS) return VK_NULL_HANDLE;
         return shader;
     }
 
@@ -198,31 +198,31 @@ namespace vb::builder {
 	ratios.clear();
 	for(auto ratio: pool_ratios) ratios.push_back(ratio);
 	auto pool = create_pool(pool_ratios, init_sets, flags);
-	if(!pool.has_value()) return;
+	if(!pool) return;
 	sets = init_sets * 1.5f;
-	ready_pools.push_back(pool.value());
+	ready_pools.push_back(pool);
     }
 
-    std::optional<VkDescriptorSet> Descriptor::allocate(VkDescriptorSetLayout layout, void* next) {
+    VkDescriptorSet Descriptor::allocate(VkDescriptorSetLayout layout, void* next) {
 	auto pool = get_pool();
-	if(!pool.has_value()) return std::nullopt;
+	if(!pool) return VK_NULL_HANDLE;
 	VkDescriptorSetAllocateInfo info = {
 	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
 	    .pNext = next,
-	    .descriptorPool = pool.value(),
+	    .descriptorPool = pool,
 	    .descriptorSetCount = 1,
 	    .pSetLayouts = &layout,
 	};
 	VkDescriptorSet set;
 	VkResult result = vkAllocateDescriptorSets(ctx->device, &info, &set);
 	if(result == VK_ERROR_OUT_OF_POOL_MEMORY || result == VK_ERROR_FRAGMENTED_POOL) {
-	    full_pools.push_back(pool.value());
+	    full_pools.push_back(pool);
 	    pool = get_pool();
-	    if(!pool.has_value()) return std::nullopt;
-	    info.descriptorPool = pool.value();
-	    if(vkAllocateDescriptorSets(ctx->device, &info, &set) != VK_SUCCESS) return std::nullopt;
+	    if(!pool) return VK_NULL_HANDLE;
+	    info.descriptorPool = pool;
+	    if(vkAllocateDescriptorSets(ctx->device, &info, &set) != VK_SUCCESS) return VK_NULL_HANDLE;
 	}
-	ready_pools.push_back(pool.value());
+	ready_pools.push_back(pool);
 	return set;
     }
 
@@ -242,20 +242,20 @@ namespace vb::builder {
 	full_pools.clear();
     }
 
-    std::optional<VkDescriptorPool> Descriptor::get_pool() {
+    VkDescriptorPool Descriptor::get_pool() {
 	if(ready_pools.size() != 0) {
 	    auto pool = ready_pools.back();
 	    ready_pools.pop_back();
 	    return pool;
 	}
 	auto pool = create_pool(ratios, sets);
-	if(!pool.has_value()) return std::nullopt;
+	if(!pool) return VK_NULL_HANDLE;
 	sets *= 1.5f;
 	if(sets > 4092) sets = 4092;
-	return pool.value();
+	return pool;
     }
 
-    std::optional<VkDescriptorPool> Descriptor::create_pool(std::span<Ratio> pool_ratios, uint32_t init_sets, VkDescriptorPoolCreateFlags flags) {
+    VkDescriptorPool Descriptor::create_pool(std::span<Ratio> pool_ratios, uint32_t init_sets, VkDescriptorPoolCreateFlags flags) {
 	std::vector<VkDescriptorPoolSize> sizes(pool_ratios.size());
 	for(size_t i = 0; i < pool_ratios.size(); i++) {
 	    sizes[i].type = pool_ratios[i].type;
@@ -269,7 +269,7 @@ namespace vb::builder {
 	    .pPoolSizes = sizes.data(),
 	};
 	VkDescriptorPool pool;
-	if(vkCreateDescriptorPool(ctx->device, &info, nullptr, &pool) != VK_SUCCESS) return std::nullopt;
+	if(vkCreateDescriptorPool(ctx->device, &info, nullptr, &pool) != VK_SUCCESS) return VK_NULL_HANDLE;
 	return pool;
     }
 
@@ -284,17 +284,11 @@ namespace vb::builder {
 	    .usage = mem_usage,
 	};
 
-	VkBuffer temp_buffer;
-	VmaAllocation temp_allocation;
-	VmaAllocationInfo temp_allocation_info;
-	if(vmaCreateBuffer(ctx->vma_allocator, &buffer_info, &allocation_info, &temp_buffer, &temp_allocation, &temp_allocation_info) != VK_SUCCESS) return;
-	buffer = temp_buffer;
-	allocation = temp_allocation;
-	info = temp_allocation_info;
+	if(vmaCreateBuffer(ctx->vma_allocator, &buffer_info, &allocation_info, &buffer, &allocation, &info) != VK_SUCCESS) return;
     }
 
     void Buffer::clean() {
-	vmaDestroyBuffer(ctx->vma_allocator, buffer.value(), allocation.value());
+	vmaDestroyBuffer(ctx->vma_allocator, buffer, allocation);
     }
 
     void Image::create(VkExtent3D extent, VkFormat format, VkImageUsageFlags usage, bool mipmap) {
@@ -317,17 +311,13 @@ namespace vb::builder {
     		.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
     	};
 
-	VkImage temp_image;
-	VmaAllocation temp_allocation;
-    	if(vmaCreateImage(ctx->vma_allocator, &image_info, &allocation_info, &temp_image, &temp_allocation, nullptr) != VK_SUCCESS) return;
-	image = temp_image;
-	allocation = temp_allocation;
+    	if(vmaCreateImage(ctx->vma_allocator, &image_info, &allocation_info, &image, &allocation, nullptr) != VK_SUCCESS) return;
 
 	VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
 	if(format == VK_FORMAT_D32_SFLOAT) aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
     	VkImageViewCreateInfo info = {
     	    .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-    	    .image = image.value(),
+    	    .image = image,
     	    .viewType = VK_IMAGE_VIEW_TYPE_2D,
     	    .format = format,
     	    .subresourceRange = {
@@ -345,11 +335,11 @@ namespace vb::builder {
 	size_t data_size = extent.depth * extent.width * extent.height * 4;
 	auto staging_buffer = Buffer(ctx);
 	staging_buffer.create(data_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-	memcpy(staging_buffer.info->pMappedData, data, data_size);
+	memcpy(staging_buffer.info.pMappedData, data, data_size);
 	create(extent, format, usage, mipmap);
 	if(!all_valid()) return;
 	ctx->submit_quick_command([&](VkCommandBuffer cmd) {
-	    sync::transition_image(cmd, image.value(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	    sync::transition_image(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 	    VkBufferImageCopy copy = {
 	        .imageSubresource = {
 	            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -358,15 +348,15 @@ namespace vb::builder {
 	        .imageExtent = extent,
 	    };
 	    log(std::format("{}", extent.width*extent.height*extent.depth*4));
-	    vkCmdCopyBufferToImage(cmd, staging_buffer.buffer.value(), image.value(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-	    sync::transition_image(cmd, image.value(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	    vkCmdCopyBufferToImage(cmd, staging_buffer.buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+	    sync::transition_image(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	});
 	staging_buffer.clean();
     }
 
     void Image::clean() {
-	vkDestroyImageView(ctx->device, image_view.value(), nullptr);
-	vmaDestroyImage(ctx->vma_allocator, image.value(), allocation.value());
+	vkDestroyImageView(ctx->device, image_view, nullptr);
+	vmaDestroyImage(ctx->vma_allocator, image, allocation);
     }
 
     void GraphicsPipeline::add_shader(VkShaderModule& shader_module, VkShaderStageFlagBits stage) {
@@ -382,7 +372,7 @@ namespace vb::builder {
 
     void GraphicsPipeline::add_shader(const char* path, VkShaderStageFlagBits stage) {
 	auto module = create::shader_module(ctx->device, path);
-	add_shader(module.value(), stage);
+	add_shader(module, stage);
     }
 
     void GraphicsPipeline::add_push_constant(const uint32_t size, VkShaderStageFlagBits stage, const uint32_t offset) {
@@ -424,9 +414,7 @@ namespace vb::builder {
 	    .pushConstantRangeCount = (uint32_t)push_constants.size(),
 	    .pPushConstantRanges = push_constants.size() == 0 ? nullptr : push_constants.data(),
 	};
-	VkPipelineLayout temp_layout;
-	if(vkCreatePipelineLayout(ctx->device, &pipeline_layout, nullptr, &temp_layout) != VK_SUCCESS) return;
-	else layout = temp_layout;
+	if(vkCreatePipelineLayout(ctx->device, &pipeline_layout, nullptr, &layout) != VK_SUCCESS) return;
         VkGraphicsPipelineCreateInfo info = {
 	   .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
     	   .stageCount = (uint32_t)shader_stages.size(),
@@ -440,13 +428,11 @@ namespace vb::builder {
     	   .pDepthStencilState = &depth_stencil,
     	   .pColorBlendState = &color_blend,
     	   .pDynamicState = &dynamic_state,
-    	   .layout = layout.value(),
+    	   .layout = layout,
 	   .renderPass = render_pass,
 	   .subpass = subpass_index,
         };
-        VkPipeline temp_pipeline;
-        if(vkCreateGraphicsPipelines(ctx->device, VK_NULL_HANDLE, 1, &info, NULL, &temp_pipeline) != VK_SUCCESS) return;
-	pipeline = temp_pipeline;
+        if(vkCreateGraphicsPipelines(ctx->device, VK_NULL_HANDLE, 1, &info, NULL, &pipeline) != VK_SUCCESS) return;
 	
 	for(auto& shader: shader_modules) {
 	    vkDestroyShaderModule(ctx->device, shader, nullptr);
@@ -455,8 +441,8 @@ namespace vb::builder {
     }
 
     void GraphicsPipeline::clean() {
-	vkDestroyPipeline(ctx->device, pipeline.value(), nullptr);
-	vkDestroyPipelineLayout(ctx->device, layout.value(), nullptr);
+	vkDestroyPipeline(ctx->device, pipeline, nullptr);
+	vkDestroyPipelineLayout(ctx->device, layout, nullptr);
     }
 }
 
