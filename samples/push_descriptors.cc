@@ -66,7 +66,6 @@ int main(int argc, char** argv) {
 	.width = 800,
 	.height = 600,
 	.required_extensions = {
-	    VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME,
 	    VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
 	},
 	.vk10features = {
