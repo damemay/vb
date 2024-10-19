@@ -137,7 +137,8 @@ namespace vb {
 	[[nodiscard]] Context(const Info& context_info);
 	~Context();
 
-	[[nodiscard]] const std::vector<const char*>& get_enabled_extensions() const { return requested_extensions; }
+	[[nodiscard]] const std::vector<std::string>& get_enabled_extensions() const { return requested_extensions; }
+	[[nodiscard]] const std::vector<std::string>& get_available_extensions() const { return available_extensions; }
 
 	void recreate_swapchain(std::function<void(uint32_t,uint32_t)>&& call_before_swapchain_create = nullptr);
 
@@ -157,8 +158,8 @@ namespace vb {
 	}
 
 	private:
-	    std::vector<const char*> available_extensions;
-	    std::vector<const char*> requested_extensions;
+	    std::vector<std::string> available_extensions;
+	    std::vector<std::string> requested_extensions;
 
 	    void create_instance();
 	    void pick_physical_device();

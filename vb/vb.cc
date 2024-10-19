@@ -347,7 +347,6 @@ namespace vb::builder {
 	        },
 	        .imageExtent = extent,
 	    };
-	    log(std::format("{}", extent.width*extent.height*extent.depth*4));
 	    vkCmdCopyBufferToImage(cmd, staging_buffer.buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
 	    sync::transition_image(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	});
@@ -671,13 +670,16 @@ namespace vb {
 	if(info.enable_all_available_features) vkGetPhysicalDeviceFeatures2(physical_device, &features);
 	if(info.enable_all_available_extensions) requested_extensions = available_extensions;
     	requested_extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+	std::vector<const char*> ext;
+	ext.resize(requested_extensions.size());
+	for(size_t i = 0; i < ext.size(); i++) ext[i] = requested_extensions[i].c_str();
     	VkDeviceCreateInfo info = {
     	    .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
     	    .pNext = &vk12features,
     	    .queueCreateInfoCount = (uint32_t)queue_infos.size(),
     	    .pQueueCreateInfos = queue_infos.data(),
     	    .enabledExtensionCount = (uint32_t)requested_extensions.size(),
-    	    .ppEnabledExtensionNames = requested_extensions.data(),
+    	    .ppEnabledExtensionNames = ext.data(),
     	    .pEnabledFeatures = &features.features,
     	};
 #ifndef NDEBUG

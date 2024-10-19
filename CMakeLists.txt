@@ -40,6 +40,7 @@ if(SAMPLE)
     set(WORKING_SAMPLES 
 	samples/imageless_framebuffer.cc
 	samples/dynamic_rendering.cc
+	samples/push_descriptors.cc
     )
     foreach(file ${WORKING_SAMPLES})
         get_filename_component(sample ${file} NAME_WLE)

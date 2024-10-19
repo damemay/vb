@@ -74,6 +74,13 @@ int main(int argc, char** argv) {
     };
     auto vbc = std::make_unique<vb::Context>(info);
 
+    auto available_extensions = vbc->get_available_extensions();
+    auto enabled_extensions = vbc->get_enabled_extensions();
+    vb::log("available extensions:");
+    for(auto& ext: available_extensions) vb::log(ext);
+    vb::log("enabled extensions:");
+    for(auto& ext: enabled_extensions) vb::log(ext);
+
     int tw, th, tc;
     stbi_uc* data = stbi_load("../textures/texture.jpg", &tw, &th, &tc, STBI_rgb_alpha);
     VB_ASSERT(data);
