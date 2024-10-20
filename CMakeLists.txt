@@ -13,13 +13,8 @@ else()
 endif()
 
 option(SAMPLE "Build samples" ON)
-
-find_package(Vulkan REQUIRED)
 find_package(SDL3 REQUIRED)
-find_package(glm REQUIRED)
 
-#set(FASTGLTF_COMPILE_AS_CPP20 ON)
-#add_subdirectory(ext/fastgltf/)
 if (WIN32)
    set(VOLK_STATIC_DEFINES VK_USE_PLATFORM_WIN32_KHR)
 endif()
@@ -28,11 +23,7 @@ include_directories(
     vb/
     ext/
     ext/volk/
-    ext/tinyobjloader/
     ext/VulkanMemoryAllocator/include/
-    ext/imgui/
-    ext/imgui/backends/
-    #ext/fastgltf/include/
 )
 
 add_library(${PROJECT_NAME}
@@ -43,11 +34,9 @@ if(SAMPLE)
     add_subdirectory(ext/volk)
     add_library(VMA ext/vma.cc)
     add_library(STB ext/stb.cc)
-    add_library(TOL ext/tol.cc)
+    find_package(glm REQUIRED)
     set(WORKING_SAMPLES 
-	#samples/push_descriptors.cc
 	samples/compute.cc
-	#samples/separate_queues.cc
     )
     foreach(file ${WORKING_SAMPLES})
         get_filename_component(sample ${file} NAME_WLE)
@@ -57,12 +46,9 @@ if(SAMPLE)
        	    ${PROJECT_NAME}
 	    volk
 	    SDL3::SDL3
-    	    #fastgltf::fastgltf
 	    glm::glm
 	    VMA
 	    STB
-	    TOL
-    	    #IMGUI
 	    m
         )
         if(CMAKE_BUILD_TYPE MATCHES "Debug")
