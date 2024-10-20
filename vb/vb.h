@@ -168,14 +168,13 @@ namespace vb::builder {
 	void flush();
 	void clean();
 
-	private:
-    	    uint32_t sets;
-    	    std::vector<Ratio> ratios;
-    	    std::vector<VkDescriptorPool> full_pools;
-    	    std::vector<VkDescriptorPool> ready_pools;
+    	uint32_t sets;
+	std::vector<Ratio> ratios;
+	std::vector<VkDescriptorPool> full_pools;
+	std::vector<VkDescriptorPool> ready_pools;
 
-	    VkDescriptorPool get_pool();
-	    VkDescriptorPool create_pool(std::span<Ratio> pool_ratios, uint32_t init_sets, VkDescriptorPoolCreateFlags flags = 0);
+	VkDescriptorPool get_pool();
+	VkDescriptorPool create_pool(std::span<Ratio> pool_ratios, uint32_t init_sets, VkDescriptorPoolCreateFlags flags = 0);
     };
 
     struct Buffer: public ContextDependant, public OptionalValidator {
