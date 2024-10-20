@@ -164,16 +164,12 @@ namespace vb::builder {
 	VB_ASSERT(vkBeginCommandBuffer(cmd_buffer, &begin) == VK_SUCCESS);
 	fn(cmd_buffer);
 	VB_ASSERT(vkEndCommandBuffer(cmd_buffer) == VK_SUCCESS);
-	VkCommandBufferSubmitInfo cmd_info = {
-	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-	    .commandBuffer = cmd_buffer,
+	VkSubmitInfo submit = {
+	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+	    .commandBufferCount = 1,
+	    .pCommandBuffers = &cmd_buffer,
 	};
- 	VkSubmitInfo2 submit = {
- 	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-	    .commandBufferInfoCount = 1,
-	    .pCommandBufferInfos = &cmd_info,
- 	};
- 	VB_ASSERT(vkQueueSubmit2(queue, 1, &submit, fence) == VK_SUCCESS);
+ 	VB_ASSERT(vkQueueSubmit(queue, 1, &submit, fence) == VK_SUCCESS);
 	vkWaitForFences(ctx->device, 1, &fence, 1, UINT64_MAX);
     }
 
