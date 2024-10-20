@@ -12,28 +12,46 @@ else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CFLAGS} -fno-rtti -fno-exceptions")
 endif()
 
-option(SAMPLE "Build samples" ON)
+option(VB_SAMPLE "Build samples" OFF)
+option(VB_BUILD_DEPS "Build dependencies" ON)
 find_package(SDL3 REQUIRED)
 
 if (WIN32)
    set(VOLK_STATIC_DEFINES VK_USE_PLATFORM_WIN32_KHR)
 endif()
 
-include_directories(
+set(VB_INCLUDE_DIRS
     vb/
     ext/
     ext/volk/
     ext/VulkanMemoryAllocator/include/
 )
 
+set(VB_LIBS
+    volk
+    SDL3::SDL3
+    VMA
+    STB
+    m
+)
+
+include_directories(${VB_INCLUDE_DIRS})
+
 add_library(${PROJECT_NAME}
     vb/vb.cc
 )
+add_library(vb::vb ALIAS ${PROJECT_NAME})
+target_include_directories(${PROJECT_NAME} PUBLIC 
+    ${VB_INCLUDE_DIRS}
+)
 
-if(SAMPLE)
+if(VB_BUILD_DEPS)
     add_subdirectory(ext/volk)
     add_library(VMA ext/vma.cc)
     add_library(STB ext/stb.cc)
+endif()
+
+if(SAMPLE)
     find_package(glm REQUIRED)
     set(WORKING_SAMPLES 
 	samples/compute.cc
@@ -44,12 +62,8 @@ if(SAMPLE)
         add_executable(${SAMPLE_BINARY} ${file})
         target_link_libraries(${SAMPLE_BINARY}
        	    ${PROJECT_NAME}
-	    volk
-	    SDL3::SDL3
+	    ${VB_LIBS}
 	    glm::glm
-	    VMA
-	    STB
-	    m
         )
         if(CMAKE_BUILD_TYPE MATCHES "Debug")
             target_link_libraries(${SAMPLE_BINARY} -fsanitize=undefined)

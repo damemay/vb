@@ -14,3 +14,11 @@ Nevertheless, for sanity's sake I had to make some assumption about creating VkI
 
 
 Not all samples are updated to newest `vb.h`. Compilable and working samples are listed in `CMakeLists.txt` as `${WORKING_SAMPLES}`.
+
+
+## Using in project
+VB is built with CMake and it's trivial to include it in your own CMake project:
+```cmake
+add_subdirectory(vb)
+target_link_libraries(${PROJECT_NAME} vb::vb)
+```
