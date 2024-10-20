@@ -20,5 +20,12 @@ Not all samples are updated to newest `vb.h`. Compilable and working samples are
 VB is built with CMake and it's trivial to include it in your own CMake project:
 ```cmake
 add_subdirectory(vb)
-target_link_libraries(${PROJECT_NAME} vb::vb)
+target_link_libraries(${PROJECT_NAME}
+    vb::vb
+    volk
+    SDL3::SDL3
+    VMA
+    STB
+    m
+)
 ```
