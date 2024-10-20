@@ -1,6 +1,6 @@
 # vulkan boilerstrap
 
-Vulkan boilerplate/bootstrap tailored for my own usage written in C++20 standard with somewhat C-ish style.
+Vulkan boilerplate/bootstrap with SDL3 window tailored for my own usage written in C++20 standard with somewhat C-ish style.
 
 It's not a one stop solution. It's made more to learn Vulkan API and it's possibilities without limiting myself to creating one kind of a rendering engine.
 

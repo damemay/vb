@@ -42,6 +42,7 @@ if(SAMPLE)
     set(WORKING_SAMPLES 
 	samples/push_descriptors.cc
 	samples/compute.cc
+	samples/separate_queues.cc
     )
     foreach(file ${WORKING_SAMPLES})
         get_filename_component(sample ${file} NAME_WLE)

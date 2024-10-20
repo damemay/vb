@@ -479,6 +479,16 @@ namespace vb {
 	init_vma();
     }
 
+    std::optional<uint32_t> Context::acquire_next_image(VkSemaphore signal_semaphore) {
+	uint32_t image_index;
+	VkResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, signal_semaphore, VK_NULL_HANDLE, &image_index);
+	if(result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+	    resize_callback();
+	    return std::nullopt;
+	}
+	return image_index;
+    }
+
     Context::~Context() {
 	vmaDestroyAllocator(vma_allocator);
 	destroy_swapchain();

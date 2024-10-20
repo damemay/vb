@@ -96,17 +96,8 @@ namespace vb {
 	[[nodiscard]] const std::vector<std::string>& get_enabled_extensions() const { return requested_extensions; }
 	[[nodiscard]] const std::vector<std::string>& get_available_extensions() const { return available_extensions; }
 
+	[[nodiscard]] std::optional<uint32_t> acquire_next_image(VkSemaphore signal_semaphore);
 	void recreate_swapchain(std::function<void(uint32_t,uint32_t)>&& call_before_swapchain_create = nullptr);
-
-	[[nodiscard]] std::optional<uint32_t> acquire_next_image(VkSemaphore signal_semaphore) {
-	    uint32_t image_index;
-	    VkResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, signal_semaphore, VK_NULL_HANDLE, &image_index);
-	    if(result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
-		resize_callback();
-		return std::nullopt;
-	    }
-	    return image_index;
-	}
 
 	protected:
 	    std::vector<std::string> available_extensions;
@@ -205,7 +196,7 @@ namespace vb::builder {
 	VkExtent3D extent;
 	VkFormat format;
 	[[nodiscard]] Image(Context* context): ContextDependant{context} {}
-	void create(VkExtent3D extent, VkFormat format = VK_FORMAT_R8G8B8A8_SRGB,
+	void create(VkExtent3D extent, VkFormat format = VK_FORMAT_B8G8R8A8_SRGB,
 		VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT  | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 		bool mipmap = false);
 	void create(CommandPool pool, void* data, VkExtent3D extent, VkFormat format = VK_FORMAT_R8G8B8A8_SRGB,
