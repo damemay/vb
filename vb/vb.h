@@ -1,14 +1,14 @@
 #pragma once
 
+#define VK_NO_PROTOTYPES
 #include <string>
 #include <functional>
 #include <optional>
 #include <span>
 #include <assert.h>
-#include <vulkan/vulkan_core.h>
 #include <SDL3/SDL.h>
-#include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
+#include <volk.h>
 
 #ifndef NDEBUG
 #define VB_ASSERT(FN) assert(FN);

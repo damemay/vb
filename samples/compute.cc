@@ -8,7 +8,6 @@
 #include <memory>
 #include <format>
 #include <vb.h>
-#include <vulkan/vulkan_core.h>
 #include <stb/stb_image.h>
 
 struct Vertex {
@@ -113,12 +112,6 @@ int main(int argc, char** argv) {
     for(auto& ext: available_extensions) vb::log(std::format("\t{}",ext));
     vb::log("enabled extensions:");
     for(auto& ext: enabled_extensions) vb::log(std::format("\t{}",ext));
-
-    auto vkGetDescriptorSetLayoutSizeEXT = (PFN_vkGetDescriptorSetLayoutSizeEXT)vkGetDeviceProcAddr(vbc->device, "vkGetDescriptorSetLayoutSizeEXT");
-    auto vkGetDescriptorSetLayoutBindingOffsetEXT = (PFN_vkGetDescriptorSetLayoutBindingOffsetEXT)vkGetDeviceProcAddr(vbc->device, "vkGetDescriptorSetLayoutBindingOffsetEXT");
-    auto vkGetDescriptorEXT = (PFN_vkGetDescriptorEXT)vkGetDeviceProcAddr(vbc->device, "vkGetDescriptorEXT");
-    auto vkCmdSetDescriptorBufferOffsetsEXT = (PFN_vkCmdSetDescriptorBufferOffsetsEXT)vkGetDeviceProcAddr(vbc->device, "vkCmdSetDescriptorBufferOffsetsEXT");
-    auto vkCmdBindDescriptorBuffersEXT = (PFN_vkCmdBindDescriptorBuffersEXT)vkGetDeviceProcAddr(vbc->device, "vkCmdBindDescriptorBuffersEXT");
 
     auto cmdpool = vb::builder::CommandPool(vbc.get());
     cmdpool.create(vbc->queues_info.graphics_queue, vbc->queues_info.graphics_index);

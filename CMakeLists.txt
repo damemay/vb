@@ -20,10 +20,14 @@ find_package(glm REQUIRED)
 
 #set(FASTGLTF_COMPILE_AS_CPP20 ON)
 #add_subdirectory(ext/fastgltf/)
+if (WIN32)
+   set(VOLK_STATIC_DEFINES VK_USE_PLATFORM_WIN32_KHR)
+endif()
 
 include_directories(
     vb/
     ext/
+    ext/volk/
     ext/tinyobjloader/
     ext/VulkanMemoryAllocator/include/
     ext/imgui/
@@ -36,6 +40,7 @@ add_library(${PROJECT_NAME}
 )
 
 if(SAMPLE)
+    add_subdirectory(ext/volk)
     add_library(VMA ext/vma.cc)
     add_library(STB ext/stb.cc)
     add_library(TOL ext/tol.cc)
@@ -50,7 +55,7 @@ if(SAMPLE)
         add_executable(${SAMPLE_BINARY} ${file})
         target_link_libraries(${SAMPLE_BINARY}
        	    ${PROJECT_NAME}
-   	    Vulkan::Vulkan
+	    volk
 	    SDL3::SDL3
     	    #fastgltf::fastgltf
 	    glm::glm

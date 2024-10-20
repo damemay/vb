@@ -3,7 +3,6 @@
 #include <fstream>
 #include <SDL3/SDL_vulkan.h>
 #include <unistd.h>
-#include <vulkan/vulkan_core.h>
 #include <math.h>
 #include <vb.h>
 
@@ -462,6 +461,7 @@ namespace vb::builder {
 
 namespace vb {
     Context::Context(const Info& context_info): info{context_info} {
+	VB_ASSERT(volkInitialize() == VK_SUCCESS);
 	if(!(info.sdl3_init_flags & SDL_INIT_VIDEO)) info.sdl3_init_flags |= SDL_INIT_VIDEO;
 	if(!(info.sdl3_window_flags & SDL_WINDOW_VULKAN)) info.sdl3_window_flags |= SDL_WINDOW_VULKAN;
 	VB_ASSERT(SDL_Init(info.sdl3_init_flags));
@@ -564,6 +564,7 @@ namespace vb {
 	}
 #endif
 	VB_ASSERT(vkCreateInstance(&info, nullptr, &instance) == VK_SUCCESS);
+	volkLoadInstanceOnly(instance);
 	available_implementation_api_version = available_implementation_api;
 	api_minor_version = minor;
     }
@@ -683,6 +684,7 @@ namespace vb {
     	}
 #endif
     	VB_ASSERT(vkCreateDevice(physical_device, &info, nullptr, &device) == VK_SUCCESS);
+	volkLoadDevice(device);
     	vkGetDeviceQueue(device, queues_info.graphics_index, 0, &queues_info.graphics_queue);
     	vkGetDeviceQueue(device, queues_info.compute_index, 0, &queues_info.compute_queue);
     	vkGetDeviceQueue(device, queues_info.present_index, 0, &queues_info.present_queue);
@@ -832,10 +834,29 @@ namespace vb {
     }
 
     void Context::init_vma() {
+	VmaVulkanFunctions vma_vulkan_func{};
+	vma_vulkan_func.vkAllocateMemory                    = vkAllocateMemory;
+	vma_vulkan_func.vkBindBufferMemory                  = vkBindBufferMemory;
+	vma_vulkan_func.vkBindImageMemory                   = vkBindImageMemory;
+	vma_vulkan_func.vkCreateBuffer                      = vkCreateBuffer;
+	vma_vulkan_func.vkCreateImage                       = vkCreateImage;
+	vma_vulkan_func.vkDestroyBuffer                     = vkDestroyBuffer;
+	vma_vulkan_func.vkDestroyImage                      = vkDestroyImage;
+	vma_vulkan_func.vkFlushMappedMemoryRanges           = vkFlushMappedMemoryRanges;
+	vma_vulkan_func.vkFreeMemory                        = vkFreeMemory;
+	vma_vulkan_func.vkGetBufferMemoryRequirements       = vkGetBufferMemoryRequirements;
+	vma_vulkan_func.vkGetImageMemoryRequirements        = vkGetImageMemoryRequirements;
+	vma_vulkan_func.vkGetPhysicalDeviceMemoryProperties = vkGetPhysicalDeviceMemoryProperties;
+	vma_vulkan_func.vkGetPhysicalDeviceProperties       = vkGetPhysicalDeviceProperties;
+	vma_vulkan_func.vkInvalidateMappedMemoryRanges      = vkInvalidateMappedMemoryRanges;
+	vma_vulkan_func.vkMapMemory                         = vkMapMemory;
+	vma_vulkan_func.vkUnmapMemory                       = vkUnmapMemory;
+	vma_vulkan_func.vkCmdCopyBuffer                     = vkCmdCopyBuffer;
 	VmaAllocatorCreateInfo info = {
 	    .flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
 	    .physicalDevice = physical_device,
 	    .device = device,
+	    .pVulkanFunctions = &vma_vulkan_func,
 	    .instance = instance,
 	};
         VB_ASSERT(vmaCreateAllocator(&info, &vma_allocator) == VK_SUCCESS);
