@@ -40,7 +40,7 @@ namespace vb {
 	    bool enable_all_available_features = false;
 
 	    VkSurfaceFormatKHR surface_format = {VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
-	    VkPresentModeKHR present_mode = VK_PRESENT_MODE_MAILBOX_KHR;
+	    VkPresentModeKHR present_mode = VK_PRESENT_MODE_FIFO_KHR;
     	};
 	uint32_t available_implementation_api_version {0};
     	uint32_t api_minor_version = 0;
@@ -121,7 +121,8 @@ namespace vb {
 
 namespace vb::sync {
     void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
-    void blit_image(VkCommandBuffer cmd, VkImage source, VkImage dest, VkExtent3D src_extent, VkExtent3D dst_extent, VkImageAspectFlags aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT);
+    void blit_image(VkCommandBuffer cmd, VkImage source, VkImage dest, VkExtent3D src_extent,
+	    VkExtent3D dst_extent, VkImageAspectFlags aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT);
 }
 
 namespace vb::create {
@@ -148,7 +149,8 @@ namespace vb::builder {
 	bool all_valid() {return pool&&fence&&queue;}
 
 	[[nodiscard]] CommandPool(Context* context): ContextDependant{context} {}
-	void create(VkQueue queue, uint32_t queue_index, VkCommandPoolCreateFlags flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+	void create(VkQueue queue, uint32_t queue_index,
+		VkCommandPoolCreateFlags flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
 	[[nodiscard]] VkCommandBuffer allocate();
 	void submit_command_buffer_to_queue(VkCommandBuffer cmd_buffer, std::function<void(VkCommandBuffer cmd)>&& fn);
 	void clean();

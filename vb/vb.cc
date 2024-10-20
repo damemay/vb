@@ -8,57 +8,58 @@
 #include <vb.h>
 
 namespace vb::sync {
-    void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout) {
-	VkImageMemoryBarrier2 barrier = {
-	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-	    .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-	    .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
-	    .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-	    .dstAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT,
+    void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout,
+	    VkImageLayout new_layout) {
+	VkImageAspectFlags aspect_mask;
+	if(new_layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL)
+	    aspect_mask = VK_IMAGE_ASPECT_DEPTH_BIT;
+	else if(new_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+	    aspect_mask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+	else
+	    aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT;
+	VkImageMemoryBarrier barrier = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+	    .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
+	    .dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT,
 	    .oldLayout = old_layout,
 	    .newLayout = new_layout,
 	    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 	    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 	    .image = image,
 	    .subresourceRange = {
-		.aspectMask = new_layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT,
+		.aspectMask = aspect_mask,
 		.levelCount = VK_REMAINING_MIP_LEVELS,
 		.layerCount = VK_REMAINING_ARRAY_LAYERS,
 	    },
 	};
-	VkDependencyInfo dependency = {
-	    .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-	    .imageMemoryBarrierCount = 1,
-	    .pImageMemoryBarriers = &barrier,
-	};
-	vkCmdPipelineBarrier2(cmd, &dependency);
+	vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr,
+		1, &barrier);
     }
 
-    void blit_image(VkCommandBuffer cmd, VkImage source, VkImage dest, VkExtent3D src_extent, VkExtent3D dst_extent, VkImageAspectFlags aspect_mask) {
-	VkImageBlit2 region = {
-	    .sType = VK_STRUCTURE_TYPE_IMAGE_BLIT_2,
+    void blit_image(VkCommandBuffer cmd, VkImage source, VkImage dest,
+	    VkExtent3D src_extent, VkExtent3D dst_extent, VkImageAspectFlags aspect_mask) {
+	VkImageBlit region = {
 	    .srcSubresource = {
 		.aspectMask = aspect_mask,
 		.layerCount = 1,
 	    },
-	    .srcOffsets = {{}, {.x = (int32_t)src_extent.width, .y = (int32_t)src_extent.height, .z = (int32_t)src_extent.depth}},
+	    .srcOffsets = {{}, {
+		(int32_t)src_extent.width,
+		(int32_t)src_extent.height,
+		(int32_t)src_extent.depth}},
 	    .dstSubresource = {
 		.aspectMask = aspect_mask,
 		.layerCount = 1,
 	    },
-	    .dstOffsets = {{}, {.x = (int32_t)dst_extent.width, .y = (int32_t)dst_extent.height, .z = (int32_t)dst_extent.depth}},
+	    .dstOffsets = {{}, {
+		(int32_t)dst_extent.width,
+		(int32_t)dst_extent.height,
+		(int32_t)dst_extent.depth}},
 	};
-	VkBlitImageInfo2 blit = {
-	    .sType = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2,
-	    .srcImage = source,
-	    .srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-	    .dstImage = dest,
-	    .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-	    .regionCount = 1,
-	    .pRegions = &region,
-	    .filter = VK_FILTER_LINEAR,
-	};
-	vkCmdBlitImage2(cmd, &blit);
+	vkCmdBlitImage(cmd, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		dest, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
+		VK_FILTER_LINEAR);
     }
 }
 
@@ -153,7 +154,8 @@ namespace vb::builder {
 	return buffer;
     }
 
-    void CommandPool::submit_command_buffer_to_queue(VkCommandBuffer cmd_buffer, std::function<void(VkCommandBuffer cmd)>&& fn) {
+    void CommandPool::submit_command_buffer_to_queue(VkCommandBuffer cmd_buffer,
+	    std::function<void(VkCommandBuffer cmd)>&& fn) {
 	vkResetFences(ctx->device, 1, &fence);
 	vkResetCommandBuffer(cmd_buffer, 0);
 	VkCommandBufferBeginInfo begin = {
@@ -244,7 +246,8 @@ namespace vb::builder {
 	return pool;
     }
 
-    VkDescriptorPool Descriptor::create_pool(std::span<Ratio> pool_ratios, uint32_t init_sets, VkDescriptorPoolCreateFlags flags) {
+    VkDescriptorPool Descriptor::create_pool(std::span<Ratio> pool_ratios, uint32_t init_sets,
+	    VkDescriptorPoolCreateFlags flags) {
 	std::vector<VkDescriptorPoolSize> sizes(pool_ratios.size());
 	for(size_t i = 0; i < pool_ratios.size(); i++) {
 	    sizes[i].type = pool_ratios[i].type;
@@ -320,7 +323,8 @@ namespace vb::builder {
 	if(vkCreateImageView(ctx->device, &info, nullptr, &image_view) != VK_SUCCESS) return;
     }
 
-    void Image::create(CommandPool pool, void* data, VkExtent3D extent, VkFormat format, VkImageUsageFlags usage, bool mipmap) {
+    void Image::create(CommandPool pool, void* data, VkExtent3D extent, VkFormat format,
+	    VkImageUsageFlags usage, bool mipmap) {
 	size_t data_size = extent.depth * extent.width * extent.height * 4;
 	auto staging_buffer = Buffer(ctx);
 	staging_buffer.create(data_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
@@ -373,7 +377,8 @@ namespace vb::builder {
 	push_constants.push_back(range);
     }
 
-    void GraphicsPipeline::create(void* pNext, VkPipelineCreateFlags flags, VkRenderPass render_pass, uint32_t subpass_index, std::vector<VkDescriptorSetLayout> descriptor_layouts) {
+    void GraphicsPipeline::create(void* pNext, VkPipelineCreateFlags flags, VkRenderPass render_pass,
+	    uint32_t subpass_index, std::vector<VkDescriptorSetLayout> descriptor_layouts) {
 	VkPipelineVertexInputStateCreateInfo vertex_input = {
 	    .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         };
@@ -644,11 +649,8 @@ namespace vb {
     	}
     	VkPhysicalDeviceVulkan13Features vk13features = info.vk13features;
 	vk13features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
-	vk13features.synchronization2 = VK_TRUE;
     	VkPhysicalDeviceVulkan12Features vk12features = info.vk12features;
     	vk12features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-	vk12features.separateDepthStencilLayouts = VK_TRUE;
-	vk12features.bufferDeviceAddress = VK_TRUE;
     	vk12features.pNext = &vk13features;
     	VkPhysicalDeviceVulkan11Features vk11features = info.vk11features;
     	vk11features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
@@ -758,8 +760,6 @@ namespace vb {
     	swapchain_extent = extent;
 	swapchain_support_data = {format, present_mode, surface_capabilities, image_count,
 	    indices.size() > 1 ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE, indices};
-	// render_extent.width = std::min(info.width, extent.width);
-	// render_extent.height = std::min(info.height, (uint32_t)(render_aspect_ratio*(float)extent.width));
     }
 
     void Context::create_swapchain_image_views() {
@@ -859,7 +859,8 @@ namespace vb {
         VB_ASSERT(create_debug_utils_messenger(instance, &info, nullptr, &debug_messenger) == VK_SUCCESS);
     }
 
-    static inline VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity, VkDebugUtilsMessageTypeFlagsEXT type, const VkDebugUtilsMessengerCallbackDataEXT* data, void* user) {
+    static inline VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+	    VkDebugUtilsMessageTypeFlagsEXT type, const VkDebugUtilsMessengerCallbackDataEXT* data, void* user) {
         log(data->pMessage);
         return VK_FALSE;
     }

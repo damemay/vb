@@ -40,9 +40,9 @@ if(SAMPLE)
     add_library(STB ext/stb.cc)
     add_library(TOL ext/tol.cc)
     set(WORKING_SAMPLES 
-	samples/push_descriptors.cc
+	#samples/push_descriptors.cc
 	samples/compute.cc
-	samples/separate_queues.cc
+	#samples/separate_queues.cc
     )
     foreach(file ${WORKING_SAMPLES})
         get_filename_component(sample ${file} NAME_WLE)

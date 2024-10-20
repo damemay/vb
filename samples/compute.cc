@@ -97,9 +97,11 @@ int main(int argc, char** argv) {
 	},
 	.vk12features = {
 	    .descriptorIndexing = VK_TRUE,
+	    .bufferDeviceAddress = VK_TRUE,
 	},
 	.vk13features = {
 	    .pNext = &buffer_ext,
+	    .synchronization2 = VK_TRUE,
 	    .dynamicRendering = VK_TRUE,
 	},
     };
