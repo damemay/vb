@@ -260,8 +260,8 @@ namespace vb::builder {
 	std::vector<VkPushConstantRange> push_constants;
 	std::vector<VkDescriptorSetLayout> descriptor_set_layouts;
 	std::vector<VkDynamicState> dynamic_states {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-	VkRenderPass render_pass;
-	uint32_t subpass_index;
+	VkRenderPass render_pass {VK_NULL_HANDLE};
+	uint32_t subpass_index {0};
 
 	[[nodiscard]] GraphicsPipeline(Context* context): ContextDependant{context} {}
 
@@ -295,7 +295,7 @@ namespace vb::builder {
 	VkPipeline pipeline {VK_NULL_HANDLE};
 	bool all_valid() {return layout&&pipeline;}
 	
-	void create(void* pNext, VkPipelineCreateFlags flags);
+	void create(void* pNext = nullptr, VkPipelineCreateFlags flags = 0);
 	void clean();
     };
 }
