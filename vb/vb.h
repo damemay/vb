@@ -207,71 +207,93 @@ namespace vb::builder {
     };
 
     struct GraphicsPipeline: public ContextDependant, public OptionalValidator {
-	private:
-	    std::vector<VkShaderModule> shader_modules;
-	    std::vector<VkPipelineShaderStageCreateInfo> shader_stages;
-	    std::vector<VkPushConstantRange> push_constants;
-	    std::vector<VkDescriptorSetLayout> descriptor_set_layouts;
+	std::vector<VkShaderModule> shader_modules;
+	std::vector<VkPipelineShaderStageCreateInfo> shader_stages;
+	std::vector<VkPushConstantRange> push_constants;
+	std::vector<VkDescriptorSetLayout> descriptor_set_layouts;
+	std::vector<VkDynamicState> dynamic_states {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
 
-	    VkPipelineInputAssemblyStateCreateInfo input_assembly = {
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-		.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-		.primitiveRestartEnable = VK_FALSE,
-	    };
-	    VkPipelineRasterizationStateCreateInfo rasterization = {
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-		.polygonMode = VK_POLYGON_MODE_FILL,
-		.cullMode = VK_CULL_MODE_BACK_BIT,
-		.frontFace = VK_FRONT_FACE_CLOCKWISE,
-		.lineWidth = 1.0f,
-	    };
-	    VkPipelineMultisampleStateCreateInfo multisample = {
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-		.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
-		.sampleShadingEnable = VK_FALSE,
-		.minSampleShading = 1.0f,
-	    };
-	    VkPipelineDepthStencilStateCreateInfo depth_stencil = {
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-		.depthCompareOp = VK_COMPARE_OP_LESS,
-		.minDepthBounds = 0.0f,
-		.maxDepthBounds = 1.0f,
-	    };
+       	VkPipelineVertexInputStateCreateInfo vertex_input = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+	};
+	VkPipelineInputAssemblyStateCreateInfo input_assembly = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+	    .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+	    .primitiveRestartEnable = VK_FALSE,
+	};
+	VkPipelineTessellationStateCreateInfo tessellation = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO,
+	};
+	VkPipelineViewportStateCreateInfo viewport = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+	    .viewportCount = 1,
+	    .scissorCount = 1,
+	};
+	VkPipelineRasterizationStateCreateInfo rasterization = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+	    .polygonMode = VK_POLYGON_MODE_FILL,
+	    .cullMode = VK_CULL_MODE_BACK_BIT,
+	    .frontFace = VK_FRONT_FACE_CLOCKWISE,
+	    .lineWidth = 1.0f,
+	};
+	VkPipelineMultisampleStateCreateInfo multisample = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+	    .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+	    .sampleShadingEnable = VK_FALSE,
+	    .minSampleShading = 1.0f,
+	};
+	VkPipelineDepthStencilStateCreateInfo depth_stencil = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+	    .depthCompareOp = VK_COMPARE_OP_LESS,
+	    .minDepthBounds = 0.0f,
+	    .maxDepthBounds = 1.0f,
+	};
+	VkPipelineColorBlendAttachmentState color_blend_attachment = {
+	    .blendEnable = VK_FALSE,
+	    .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
+		| VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+	};
+	VkPipelineColorBlendStateCreateInfo color_blend = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+	    .logicOpEnable = VK_FALSE,
+	    .logicOp = VK_LOGIC_OP_COPY,
+	    .attachmentCount = 1,
+	    .pAttachments = &color_blend_attachment,
+	};
 
-	public:
-	    [[nodiscard]] GraphicsPipeline(Context* context): ContextDependant{context} {}
-
-	    void add_shader(VkShaderModule& shader_module, VkShaderStageFlagBits stage);
-	    void add_shader(const char* path, VkShaderStageFlagBits stage);
-
-	    void add_push_constant(const uint32_t size, VkShaderStageFlagBits stage, const uint32_t offset = 0);
-
-	    // input assembly
-	    inline void set_topology(VkPrimitiveTopology topology) { input_assembly.topology = topology; }
-	    // rasterization
-	    inline void set_polygon_mode(VkPolygonMode mode) { rasterization.polygonMode = mode; }
-	    inline void set_cull_mode(VkCullModeFlags mode) { rasterization.cullMode = mode; }
-	    inline void set_front_face(VkFrontFace face) { rasterization.frontFace = face; }
-	    // multisample
-	    inline void set_sample_count(VkSampleCountFlagBits count) { multisample.rasterizationSamples = count; }
-	    inline void enable_sample_shading(float min_sample = 1.0f) { multisample.sampleShadingEnable = VK_TRUE; multisample.minSampleShading = min_sample; }
-	    // detph stencil
-	    inline void enable_depth_test() { depth_stencil.depthTestEnable = VK_TRUE; depth_stencil.depthWriteEnable = VK_TRUE; }
-	    inline void set_depth_comparison(VkCompareOp operation) { depth_stencil.depthCompareOp =operation; }
-	    inline void enable_depth_bounds_test() { depth_stencil.depthBoundsTestEnable = VK_TRUE; }
-	    inline void set_depth_bounds(float min, float max) { depth_stencil.minDepthBounds = min; depth_stencil.maxDepthBounds = max; }
-	    inline void enable_stencil_test() { depth_stencil.stencilTestEnable = VK_TRUE; }
-	    inline void set_stencil_operations(VkStencilOpState front, VkStencilOpState back) { depth_stencil.front = front; depth_stencil.back = back; }
-
-	    VkPipelineLayout layout {VK_NULL_HANDLE};
-	    VkPipeline pipeline {VK_NULL_HANDLE};
-	    bool all_valid() {return layout&&pipeline;}
-
-	    void create(void* pNext, VkPipelineCreateFlags flags, VkRenderPass render_pass, uint32_t subpass_index, std::vector<VkDescriptorSetLayout> descriptor_layouts);
-	    void create(VkRenderPass render_pass, uint32_t subpass_index = 0, std::vector<VkDescriptorSetLayout> descriptor_layouts = {});
-	    void create(void* pNext, std::vector<VkDescriptorSetLayout> descriptor_layouts = {});
-	    void create(void* pNext, VkPipelineCreateFlags flags = 0, std::vector<VkDescriptorSetLayout> descriptor_layouts = {});
-	    void clean();
+	[[nodiscard]] GraphicsPipeline(Context* context): ContextDependant{context} {}
+	
+	void add_shader(VkShaderModule& shader_module, VkShaderStageFlagBits stage);
+	void add_shader(const char* path, VkShaderStageFlagBits stage);
+	
+	void add_push_constant(const uint32_t size, VkShaderStageFlagBits stage, const uint32_t offset = 0);
+	
+	// input assembly
+	inline void set_topology(VkPrimitiveTopology topology) { input_assembly.topology = topology; }
+	// rasterization
+	inline void set_polygon_mode(VkPolygonMode mode) { rasterization.polygonMode = mode; }
+	inline void set_cull_mode(VkCullModeFlags mode) { rasterization.cullMode = mode; }
+	inline void set_front_face(VkFrontFace face) { rasterization.frontFace = face; }
+	// multisample
+	inline void set_sample_count(VkSampleCountFlagBits count) { multisample.rasterizationSamples = count; }
+	inline void enable_sample_shading(float min_sample = 1.0f) { multisample.sampleShadingEnable = VK_TRUE; multisample.minSampleShading = min_sample; }
+	// detph stencil
+	inline void enable_depth_test() { depth_stencil.depthTestEnable = VK_TRUE; depth_stencil.depthWriteEnable = VK_TRUE; }
+	inline void set_depth_comparison(VkCompareOp operation) { depth_stencil.depthCompareOp =operation; }
+	inline void enable_depth_bounds_test() { depth_stencil.depthBoundsTestEnable = VK_TRUE; }
+	inline void set_depth_bounds(float min, float max) { depth_stencil.minDepthBounds = min; depth_stencil.maxDepthBounds = max; }
+	inline void enable_stencil_test() { depth_stencil.stencilTestEnable = VK_TRUE; }
+	inline void set_stencil_operations(VkStencilOpState front, VkStencilOpState back) { depth_stencil.front = front; depth_stencil.back = back; }
+	
+	VkPipelineLayout layout {VK_NULL_HANDLE};
+	VkPipeline pipeline {VK_NULL_HANDLE};
+	bool all_valid() {return layout&&pipeline;}
+	
+	void create(void* pNext, VkPipelineCreateFlags flags, VkRenderPass render_pass, uint32_t subpass_index, std::vector<VkDescriptorSetLayout> descriptor_layouts);
+	void create(VkRenderPass render_pass, uint32_t subpass_index = 0, std::vector<VkDescriptorSetLayout> descriptor_layouts = {});
+	void create(void* pNext, std::vector<VkDescriptorSetLayout> descriptor_layouts = {});
+	void create(void* pNext, VkPipelineCreateFlags flags = 0, std::vector<VkDescriptorSetLayout> descriptor_layouts = {});
+	void clean();
     };
 }
 

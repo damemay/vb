@@ -374,31 +374,10 @@ namespace vb::builder {
 
     void GraphicsPipeline::create(void* pNext, VkPipelineCreateFlags flags, VkRenderPass render_pass,
 	    uint32_t subpass_index, std::vector<VkDescriptorSetLayout> descriptor_layouts) {
-	VkPipelineVertexInputStateCreateInfo vertex_input = {
-	    .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        };
-        VkPipelineViewportStateCreateInfo viewport = {
-	    .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-	    .viewportCount = 1,
-	    .scissorCount = 1,
-        };
-        VkPipelineColorBlendAttachmentState color_blend_attachment = {
-	    .blendEnable = VK_FALSE,
-	    .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
-		| VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
-        };
-        VkPipelineColorBlendStateCreateInfo color_blend = {
-	    .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-	    .logicOpEnable = VK_FALSE,
-	    .logicOp = VK_LOGIC_OP_COPY,
-	    .attachmentCount = 1,
-	    .pAttachments = &color_blend_attachment,
-        };
-        VkDynamicState states[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
         VkPipelineDynamicStateCreateInfo dynamic_state = {
 	    .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-	    .dynamicStateCount = 2,
-	    .pDynamicStates = states,
+	    .dynamicStateCount = (uint32_t)dynamic_states.size(),
+	    .pDynamicStates = dynamic_states.data(),
         };
 	VkPipelineLayoutCreateInfo pipeline_layout = {
 	    .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -416,7 +395,7 @@ namespace vb::builder {
     	   .pStages = shader_stages.data(),
     	   .pVertexInputState = &vertex_input,
     	   .pInputAssemblyState = &input_assembly,
-    	   //.pTessellationState = tessellation,
+    	   .pTessellationState = &tessellation,
     	   .pViewportState = &viewport,
     	   .pRasterizationState = &rasterization,
     	   .pMultisampleState = &multisample,
