@@ -207,12 +207,6 @@ namespace vb::builder {
     };
 
     struct GraphicsPipeline: public ContextDependant, public OptionalValidator {
-	std::vector<VkShaderModule> shader_modules;
-	std::vector<VkPipelineShaderStageCreateInfo> shader_stages;
-	std::vector<VkPushConstantRange> push_constants;
-	std::vector<VkDescriptorSetLayout> descriptor_set_layouts;
-	std::vector<VkDynamicState> dynamic_states {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-
        	VkPipelineVertexInputStateCreateInfo vertex_input = {
 	    .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 	};
@@ -261,12 +255,24 @@ namespace vb::builder {
 	    .pAttachments = &color_blend_attachment,
 	};
 
+	std::vector<VkShaderModule> shader_modules;
+	std::vector<VkPipelineShaderStageCreateInfo> shader_stages;
+	std::vector<VkPushConstantRange> push_constants;
+	std::vector<VkDescriptorSetLayout> descriptor_set_layouts;
+	std::vector<VkDynamicState> dynamic_states {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+	VkRenderPass render_pass;
+	uint32_t subpass_index;
+
 	[[nodiscard]] GraphicsPipeline(Context* context): ContextDependant{context} {}
+
+	void set_render_pass(VkRenderPass renderpass) { render_pass = renderpass; }
+	void set_subpass_index(uint32_t index) { subpass_index = index; }
 	
 	void add_shader(VkShaderModule& shader_module, VkShaderStageFlagBits stage);
 	void add_shader(const char* path, VkShaderStageFlagBits stage);
 	
 	void add_push_constant(const uint32_t size, VkShaderStageFlagBits stage, const uint32_t offset = 0);
+	void add_descriptor_set_layout(VkDescriptorSetLayout descriptor_set_layout) { descriptor_set_layouts.push_back(descriptor_set_layout); }
 	
 	// input assembly
 	inline void set_topology(VkPrimitiveTopology topology) { input_assembly.topology = topology; }
@@ -289,10 +295,7 @@ namespace vb::builder {
 	VkPipeline pipeline {VK_NULL_HANDLE};
 	bool all_valid() {return layout&&pipeline;}
 	
-	void create(void* pNext, VkPipelineCreateFlags flags, VkRenderPass render_pass, uint32_t subpass_index, std::vector<VkDescriptorSetLayout> descriptor_layouts);
-	void create(VkRenderPass render_pass, uint32_t subpass_index = 0, std::vector<VkDescriptorSetLayout> descriptor_layouts = {});
-	void create(void* pNext, std::vector<VkDescriptorSetLayout> descriptor_layouts = {});
-	void create(void* pNext, VkPipelineCreateFlags flags = 0, std::vector<VkDescriptorSetLayout> descriptor_layouts = {});
+	void create(void* pNext, VkPipelineCreateFlags flags);
 	void clean();
     };
 }

@@ -372,8 +372,7 @@ namespace vb::builder {
 	push_constants.push_back(range);
     }
 
-    void GraphicsPipeline::create(void* pNext, VkPipelineCreateFlags flags, VkRenderPass render_pass,
-	    uint32_t subpass_index, std::vector<VkDescriptorSetLayout> descriptor_layouts) {
+    void GraphicsPipeline::create(void* pNext, VkPipelineCreateFlags flags) {
         VkPipelineDynamicStateCreateInfo dynamic_state = {
 	    .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
 	    .dynamicStateCount = (uint32_t)dynamic_states.size(),
@@ -381,8 +380,8 @@ namespace vb::builder {
         };
 	VkPipelineLayoutCreateInfo pipeline_layout = {
 	    .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-	    .setLayoutCount = (uint32_t)descriptor_layouts.size(),
-	    .pSetLayouts = descriptor_layouts.empty() ? nullptr : descriptor_layouts.data(),
+	    .setLayoutCount = (uint32_t)descriptor_set_layouts.size(),
+	    .pSetLayouts = descriptor_set_layouts.empty() ? nullptr : descriptor_set_layouts.data(),
 	    .pushConstantRangeCount = (uint32_t)push_constants.size(),
 	    .pPushConstantRanges = push_constants.size() == 0 ? nullptr : push_constants.data(),
 	};
@@ -412,18 +411,6 @@ namespace vb::builder {
 	    vkDestroyShaderModule(ctx->device, shader, nullptr);
 	    shader_modules.clear();
 	}
-    }
-
-    void GraphicsPipeline::create(VkRenderPass render_pass, uint32_t subpass_index, std::vector<VkDescriptorSetLayout> descriptor_layouts) {
-	create(nullptr, 0, render_pass, subpass_index, descriptor_layouts);
-    }
-
-    void GraphicsPipeline::create(void* pNext, std::vector<VkDescriptorSetLayout> descriptor_layouts) {
-	create(pNext, 0, nullptr, 0, descriptor_layouts);
-    }
-
-    void GraphicsPipeline::create(void* pNext, VkPipelineCreateFlags flags, std::vector<VkDescriptorSetLayout> descriptor_layouts) {
-	create(pNext, flags, nullptr, 0, descriptor_layouts);
     }
 
     void GraphicsPipeline::clean() {
