@@ -24,7 +24,7 @@ struct PushConstants {
 };
 
 struct Frame {
-    vb::builder::CommandPool pool;
+    vb::CommandPool pool;
     VkCommandBuffer cmd;
     VkSemaphore image_available;
     VkSemaphore finish_render;
@@ -34,11 +34,11 @@ struct Frame {
 struct Rectangle {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
-    vb::builder::Buffer vertex_buffer;
-    vb::builder::Buffer index_buffer;
+    vb::Buffer vertex_buffer;
+    vb::Buffer index_buffer;
     VkDeviceAddress vertex_buffer_address;
 
-    Rectangle(vb::Context* context, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, vb::builder::CommandPool pool)
+    Rectangle(vb::Context* context, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, vb::CommandPool pool)
 	: vertex_buffer{context}, index_buffer{context}, vertices{vertices}, indices{indices} {
 	    const size_t vertices_size = sizeof(Vertex) * vertices.size();
 	    vertex_buffer.create(vertices_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT 
@@ -56,7 +56,7 @@ struct Rectangle {
 		    | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
 	    VB_ASSERT(index_buffer.all_valid());
 
-	    auto staging_buffer = vb::builder::Buffer{context};
+	    auto staging_buffer = vb::Buffer{context};
     	    staging_buffer.create(vertices_size + indices_size,
 		    VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 	    VB_ASSERT(staging_buffer.all_valid());
@@ -84,10 +84,11 @@ int main(int argc, char** argv) {
 	.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT,
 	.descriptorBuffer = VK_TRUE,
     };
-    auto info = vb::Context::Info {
+    auto info = vb::ContextInfo {
 	.title = "vbc",
 	.width = 800,
 	.height = 600,
+	.enable_debug = true,
 	.required_extensions = {
 	    VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME,
 	},
@@ -113,14 +114,14 @@ int main(int argc, char** argv) {
     vb::log("enabled extensions:");
     for(auto& ext: enabled_extensions) vb::log(std::format("\t{}",ext));
 
-    auto cmdpool = vb::builder::CommandPool(vbc.get());
+    auto cmdpool = vb::CommandPool(vbc.get());
     cmdpool.create(vbc->queues_info.graphics_queue, vbc->queues_info.graphics_index);
     cmdpool.all_valid();
 
     int tw, th, tc;
     stbi_uc* data = stbi_load("../textures/texture.jpg", &tw, &th, &tc, STBI_rgb_alpha);
     VB_ASSERT(data);
-    auto texture = vb::builder::Image(vbc.get());
+    auto texture = vb::Image(vbc.get());
     VkExtent3D size = {(uint32_t)tw,(uint32_t)th,1};
     texture.create(cmdpool, data, size);
     VB_ASSERT(texture.all_valid());
@@ -192,7 +193,7 @@ int main(int argc, char** argv) {
     layout_size = aligned_size(layout_size, descriptor_buffer_prop.descriptorBufferOffsetAlignment);
     size_t binding_offset = 0;
     vkGetDescriptorSetLayoutBindingOffsetEXT(vbc->device, layout, 0, &binding_offset);
-    auto descriptor_buffer = vb::builder::Buffer(vbc.get());
+    auto descriptor_buffer = vb::Buffer(vbc.get());
     descriptor_buffer.create(size.depth*size.width*size.height*4*layout_size,
 	    VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
     VB_ASSERT(descriptor_buffer.all_valid());
@@ -222,15 +223,16 @@ int main(int argc, char** argv) {
     };
     uint32_t buffer_index = 0;
 
-    auto graphics_pipeline = vb::builder::GraphicsPipeline{vbc.get()};
+    auto graphics_pipeline = vb::GraphicsPipeline{vbc.get()};
     graphics_pipeline.set_front_face(VK_FRONT_FACE_COUNTER_CLOCKWISE);
     graphics_pipeline.enable_depth_test();
 
     graphics_pipeline.add_shader("../shaders/full_vert.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
     graphics_pipeline.add_shader("../shaders/textured.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
     graphics_pipeline.add_push_constant(sizeof(PushConstants), VK_SHADER_STAGE_VERTEX_BIT);
+    graphics_pipeline.add_descriptor_set_layout(layout);
 
-    auto depth_image = vb::builder::Image(vbc.get());
+    auto depth_image = vb::Image(vbc.get());
     depth_image.create({vbc->swapchain_extent.width, vbc->swapchain_extent.height, 1},
 	    VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
     VB_ASSERT(depth_image.all_valid());
@@ -243,10 +245,10 @@ int main(int argc, char** argv) {
 	.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT,
     };
 
-    graphics_pipeline.create(&rendering_info, VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT, {layout});
+    graphics_pipeline.create(&rendering_info, VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT);
     VB_ASSERT(graphics_pipeline.all_valid());
 
-    auto comp_image = vb::builder::Image(vbc.get());
+    auto comp_image = vb::Image(vbc.get());
     comp_image.create({vbc->swapchain_extent.width, vbc->swapchain_extent.height, 1},
 	    VK_FORMAT_R16G16B16A16_SFLOAT);
     VB_ASSERT(comp_image.all_valid());
@@ -271,7 +273,7 @@ int main(int argc, char** argv) {
     compute_dlayout_size = aligned_size(compute_dlayout_size, descriptor_buffer_prop.descriptorBufferOffsetAlignment);
     size_t cbinding_offset = 0;
     vkGetDescriptorSetLayoutBindingOffsetEXT(vbc->device, compute_dlayout, 0, &cbinding_offset);
-    auto cdescriptor_buffer = vb::builder::Buffer(vbc.get());
+    auto cdescriptor_buffer = vb::Buffer(vbc.get());
     cdescriptor_buffer.create(vbc->swapchain_extent.width*vbc->swapchain_extent.height*4*compute_dlayout_size, VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
     VB_ASSERT(cdescriptor_buffer.all_valid());
     char* cbuffer_data = (char*)cdescriptor_buffer.info.pMappedData;
@@ -306,7 +308,7 @@ int main(int argc, char** argv) {
     };
     VkPipelineLayout compute_layout;
     vkCreatePipelineLayout(vbc->device, &compute_layout_inf, nullptr, &compute_layout);
-    auto comp_shader = vb::create::shader_module(vbc->device, "../shaders/grad.comp.spv");
+    auto comp_shader = vb::create_shader_module(vbc->device, "../shaders/grad.comp.spv");
     VB_ASSERT(comp_shader);
     VkPipelineShaderStageCreateInfo stage = {
 	.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -343,11 +345,11 @@ int main(int argc, char** argv) {
 	VB_ASSERT(frame.pool.all_valid());
 	frame.cmd = frame.pool.allocate();
 	VB_ASSERT(frame.cmd);
-	frame.render = vb::create::fence(vbc->device, VK_FENCE_CREATE_SIGNALED_BIT);
+	frame.render = vb::create_fence(vbc->device, VK_FENCE_CREATE_SIGNALED_BIT);
 	VB_ASSERT(frame.render);
-	frame.image_available = vb::create::semaphore(vbc->device);
+	frame.image_available = vb::create_semaphore(vbc->device);
 	VB_ASSERT(frame.image_available);
-	frame.finish_render = vb::create::semaphore(vbc->device);
+	frame.finish_render = vb::create_semaphore(vbc->device);
 	VB_ASSERT(frame.finish_render);
     }
 
@@ -391,16 +393,16 @@ int main(int argc, char** argv) {
 	    {.color = {0.0f, 0.0f, 0.0f, 1.0f}},
 	    {.depthStencil = {1.0f, 0}},
 	};
-	vb::sync::transition_image(frame->cmd, comp_image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+	vb::transition_image(frame->cmd, comp_image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 	vkCmdBindPipeline(frame->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, compute_pipeline);
 	vkCmdBindDescriptorBuffersEXT(frame->cmd, 1, &cbinding_info);
 	vkCmdSetDescriptorBufferOffsetsEXT(frame->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, compute_layout, 0, 1, &cbuffer_index, &cbinding_offset);
 	vkCmdDispatch(frame->cmd, ceil(vbc->swapchain_extent.width/16.0), ceil(vbc->swapchain_extent.height/16.0), 1);
-	vb::sync::transition_image(frame->cmd, comp_image.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-	vb::sync::transition_image(frame->cmd, vbc->swapchain_images[image_index], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-	vb::sync::blit_image(frame->cmd, comp_image.image, vbc->swapchain_images[image_index], comp_image.extent, {vbc->swapchain_extent.width, vbc->swapchain_extent.height, 1});
-	vb::sync::transition_image(frame->cmd, vbc->swapchain_images[image_index], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-	vb::sync::transition_image(frame->cmd, depth_image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+	vb::transition_image(frame->cmd, comp_image.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	vb::transition_image(frame->cmd, vbc->swapchain_images[image_index], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	vb::blit_image(frame->cmd, comp_image.image, vbc->swapchain_images[image_index], comp_image.extent, {vbc->swapchain_extent.width, vbc->swapchain_extent.height, 1});
+	vb::transition_image(frame->cmd, vbc->swapchain_images[image_index], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+	vb::transition_image(frame->cmd, depth_image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 	VkRenderingAttachmentInfo color_info = {
 	    .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
 	    .imageView = vbc->swapchain_image_views[image_index],
@@ -447,7 +449,7 @@ int main(int argc, char** argv) {
 	vkCmdBindIndexBuffer(frame->cmd, rectangle2.index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 	vkCmdDrawIndexed(frame->cmd, (uint32_t)indices.size(), 2, 0, 0, 0);
 	vkCmdEndRendering(frame->cmd);
-	vb::sync::transition_image(frame->cmd, vbc->swapchain_images[image_index], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+	vb::transition_image(frame->cmd, vbc->swapchain_images[image_index], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
 	VB_ASSERT(vkEndCommandBuffer(frame->cmd) == VK_SUCCESS);
 	VkCommandBufferSubmitInfo cmd_info = {

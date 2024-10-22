@@ -21,31 +21,36 @@ namespace vb {
     struct ContextDependant {Context* ctx;};
     static inline void log(const std::string& buf) {fprintf(stderr, "vb: %s\n", buf.c_str());}
 
+    struct ContextInfo {
+        std::string title;
+        uint32_t width;
+        uint32_t height;
+        SDL_InitFlags sdl3_init_flags;
+        SDL_WindowFlags sdl3_window_flags;
+
+	bool enable_debug {false};
+    
+        std::vector<const char*> required_extensions;
+        std::vector<const char*> optional_extensions;
+        bool enable_all_available_extensions {false};
+    
+        VkPhysicalDeviceFeatures vk10features;
+        VkPhysicalDeviceVulkan11Features vk11features;
+        VkPhysicalDeviceVulkan12Features vk12features;
+        VkPhysicalDeviceVulkan13Features vk13features;
+        bool enable_all_available_features {false};
+    
+        VkSurfaceFormatKHR surface_format = {
+	    VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
+	};
+        VkPresentModeKHR present_mode = VK_PRESENT_MODE_FIFO_KHR;
+    };
+
     struct Context {
-	struct Info {
-	    std::string title;
-	    uint32_t width;
-    	    uint32_t height;
-	    SDL_InitFlags sdl3_init_flags;
-	    SDL_WindowFlags sdl3_window_flags;
-
-	    std::vector<const char*> required_extensions;
-	    std::vector<const char*> optional_extensions;
-	    bool enable_all_available_extensions = false;
-
-	    VkPhysicalDeviceFeatures vk10features;
-	    VkPhysicalDeviceVulkan11Features vk11features;
-	    VkPhysicalDeviceVulkan12Features vk12features;
-	    VkPhysicalDeviceVulkan13Features vk13features;
-	    bool enable_all_available_features = false;
-
-	    VkSurfaceFormatKHR surface_format = {VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
-	    VkPresentModeKHR present_mode = VK_PRESENT_MODE_FIFO_KHR;
-    	};
 	uint32_t available_implementation_api_version {0};
     	uint32_t api_minor_version = 0;
 
-	Info info;
+	ContextInfo info;
 	SDL_Window* window {nullptr};
 
 	VmaAllocator vma_allocator;
@@ -82,19 +87,19 @@ namespace vb {
 
     	static constexpr const char* validation_layer_name[1] {"VK_LAYER_KHRONOS_validation"};
 	bool validation_layers_support {false};
-#ifndef NDEBUG
 	VkDebugUtilsMessengerEXT debug_messenger;
-#endif
 
 	std::function<void()> resize_callback {nullptr};
 
-	[[nodiscard]] Context(const Info& context_info);
+	[[nodiscard]] Context(const ContextInfo& context_info);
 	~Context();
 
 	void set_resize_callback(std::function<void()>&& fn) { resize_callback = fn; }
 
-	[[nodiscard]] const std::vector<std::string>& get_enabled_extensions() const { return requested_extensions; }
-	[[nodiscard]] const std::vector<std::string>& get_available_extensions() const { return available_extensions; }
+	[[nodiscard]] const std::vector<std::string>& get_enabled_extensions() const
+	    { return requested_extensions; }
+	[[nodiscard]] const std::vector<std::string>& get_available_extensions() const
+	    { return available_extensions; }
 
 	[[nodiscard]] std::optional<uint32_t> acquire_next_image(VkSemaphore signal_semaphore);
 	void recreate_swapchain(std::function<void(uint32_t,uint32_t)>&& call_before_swapchain_create = nullptr);
@@ -111,34 +116,22 @@ namespace vb {
 	    void create_swapchain_image_views();
 	    void destroy_swapchain();
 	    void init_vma();
-#ifndef NDEBUG
 	    [[nodiscard]] VkDebugUtilsMessengerCreateInfoEXT fill_debug_messenger_create_info();
 	    void create_debug_messenger();
 	    [[nodiscard]] bool test_for_validation_layers();
-#endif
     };
-}
 
-namespace vb::sync {
-    void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
+    void transition_image(VkCommandBuffer cmd, VkImage image,
+	    VkImageLayout old_layout, VkImageLayout new_layout);
     void blit_image(VkCommandBuffer cmd, VkImage source, VkImage dest, VkExtent3D src_extent,
 	    VkExtent3D dst_extent, VkImageAspectFlags aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT);
-}
 
-namespace vb::create {
-    [[nodiscard]] VkCommandPool cmd_pool(VkDevice device, uint32_t queue_family_index,
-	    VkCommandPoolCreateFlags flags);
-    [[nodiscard]] VkSemaphore semaphore(VkDevice device, VkSemaphoreCreateFlags flags = 0);
-    [[nodiscard]] VkFence fence(VkDevice device, VkFenceCreateFlags flags = 0);
-    [[nodiscard]] VkDescriptorSetLayout descriptor_set_layout(VkDevice device,
-	    std::vector<VkDescriptorSetLayoutBinding> bindings,
-	    VkShaderStageFlags stages,
-	    VkDescriptorSetLayoutCreateFlags flags,
-	    void* next);
-    [[nodiscard]] VkShaderModule shader_module(VkDevice device, const char* path);
-}
+    [[nodiscard]] VkCommandPool create_cmd_pool(VkDevice device,
+	    uint32_t queue_family_index, VkCommandPoolCreateFlags flags);
+    [[nodiscard]] VkSemaphore create_semaphore(VkDevice device, VkSemaphoreCreateFlags flags = 0);
+    [[nodiscard]] VkFence create_fence(VkDevice device, VkFenceCreateFlags flags = 0);
+    [[nodiscard]] VkShaderModule create_shader_module(VkDevice device, const char* path);
 
-namespace vb::builder {
     struct OptionalValidator {virtual bool all_valid() = 0;};
 
     struct CommandPool : public ContextDependant, public OptionalValidator {
@@ -156,13 +149,13 @@ namespace vb::builder {
 	void clean();
     };
 
-    struct Descriptor : public ContextDependant {
+    struct DescriptorAllocator : public ContextDependant {
 	struct Ratio {
 	    VkDescriptorType type;
 	    float ratio;
 	};
 
-	[[nodiscard]] Descriptor(Context* context): ContextDependant{context} {}
+	[[nodiscard]] DescriptorAllocator(Context* context): ContextDependant{context} {}
 	void create(std::span<Ratio> pool_ratios, uint32_t init_sets = 1000, VkDescriptorPoolCreateFlags flags = 0);
 	[[nodiscard]] VkDescriptorSet allocate(VkDescriptorSetLayout layout, void* next = nullptr);
 	void flush();
@@ -173,8 +166,9 @@ namespace vb::builder {
 	std::vector<VkDescriptorPool> full_pools;
 	std::vector<VkDescriptorPool> ready_pools;
 
-	VkDescriptorPool get_pool();
-	VkDescriptorPool create_pool(std::span<Ratio> pool_ratios, uint32_t init_sets, VkDescriptorPoolCreateFlags flags = 0);
+	[[nodiscard]] VkDescriptorPool get_pool();
+	[[nodiscard]] VkDescriptorPool create_pool(std::span<Ratio> pool_ratios,
+		uint32_t init_sets, VkDescriptorPoolCreateFlags flags = 0);
     };
 
     struct Buffer: public ContextDependant, public OptionalValidator {
@@ -200,7 +194,8 @@ namespace vb::builder {
 	void create(VkExtent3D extent, VkFormat format = VK_FORMAT_B8G8R8A8_SRGB,
 		VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT  | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 		bool mipmap = false);
-	void create(CommandPool pool, void* data, VkExtent3D extent, VkFormat format = VK_FORMAT_R8G8B8A8_SRGB,
+	void create(CommandPool pool, void* data, VkExtent3D extent,
+		VkFormat format = VK_FORMAT_R8G8B8A8_SRGB,
 		VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 		bool mipmap = false);
 	void clean();

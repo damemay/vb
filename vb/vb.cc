@@ -6,7 +6,7 @@
 #include <math.h>
 #include <vb.h>
 
-namespace vb::sync {
+namespace vb {
     void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout,
 	    VkImageLayout new_layout) {
 	VkImageAspectFlags aspect_mask;
@@ -60,10 +60,8 @@ namespace vb::sync {
 		dest, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
 		VK_FILTER_LINEAR);
     }
-}
 
-namespace vb::create {
-    VkShaderModule shader_module(VkDevice device, const char* path) {
+    VkShaderModule create_shader_module(VkDevice device, const char* path) {
 	std::ifstream file {path, std::ios::ate | std::ios::binary};
 	if(!file.is_open()) return VK_NULL_HANDLE;
 	size_t size = file.tellg();
@@ -81,7 +79,7 @@ namespace vb::create {
         return shader;
     }
 
-    VkCommandPool cmd_pool(VkDevice device, uint32_t queue_family_index,
+    VkCommandPool create_cmd_pool(VkDevice device, uint32_t queue_family_index,
 	    VkCommandPoolCreateFlags flags) {
 	VkCommandPoolCreateInfo info = {
 	    .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -93,7 +91,7 @@ namespace vb::create {
 	return pool;
     }
 
-    VkSemaphore semaphore(VkDevice device, VkSemaphoreCreateFlags flags) {
+    VkSemaphore create_semaphore(VkDevice device, VkSemaphoreCreateFlags flags) {
         VkSemaphoreCreateInfo info = {
 	   .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
     	   .flags = flags,
@@ -103,7 +101,7 @@ namespace vb::create {
         return semaphore;
     }
     
-    VkFence fence(VkDevice device, VkFenceCreateFlags flags) {
+    VkFence create_fence(VkDevice device, VkFenceCreateFlags flags) {
         VkFenceCreateInfo info = {
 	    .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
 	    .flags = flags,
@@ -113,32 +111,11 @@ namespace vb::create {
         return fence;
     }
 
-    VkDescriptorSetLayout descriptor_set_layout(VkDevice device,
-	    std::vector<VkDescriptorSetLayoutBinding> bindings,
-	    VkShaderStageFlags stages,
-	    VkDescriptorSetLayoutCreateFlags flags,
-	    void* next) {
-	if(stages) for(auto& binding: bindings)
-	    binding.stageFlags |= stages;
-	VkDescriptorSetLayoutCreateInfo info = {
-	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-	    .pNext = next,
-	    .flags = flags,
-	    .bindingCount = (uint32_t)bindings.size(),
-	    .pBindings = bindings.data(),
-	};
-	VkDescriptorSetLayout set;
-	VB_ASSERT(vkCreateDescriptorSetLayout(device, &info, NULL, &set) == VK_SUCCESS);
-	return set;
-    }
-}
-
-namespace vb::builder {
     void CommandPool::create(VkQueue queue, uint32_t queue_index, VkCommandPoolCreateFlags flags) {
 	this->queue = queue;
 	this->queue_index = queue_index;
-	pool = create::cmd_pool(ctx->device, queue_index, flags);
-	fence = create::fence(ctx->device);
+	pool = create_cmd_pool(ctx->device, queue_index, flags);
+	fence = create_fence(ctx->device);
     }
 
     [[nodiscard]] VkCommandBuffer CommandPool::allocate() {
@@ -180,7 +157,8 @@ namespace vb::builder {
 	fence = VK_NULL_HANDLE;
     }
 
-    void Descriptor::create(std::span<Ratio> pool_ratios, uint32_t init_sets, VkDescriptorPoolCreateFlags flags) {
+    void DescriptorAllocator::create(std::span<Ratio> pool_ratios, uint32_t init_sets,
+	    VkDescriptorPoolCreateFlags flags) {
 	ratios.clear();
 	for(auto ratio: pool_ratios) ratios.push_back(ratio);
 	auto pool = create_pool(pool_ratios, init_sets, flags);
@@ -189,7 +167,7 @@ namespace vb::builder {
 	ready_pools.push_back(pool);
     }
 
-    VkDescriptorSet Descriptor::allocate(VkDescriptorSetLayout layout, void* next) {
+    VkDescriptorSet DescriptorAllocator::allocate(VkDescriptorSetLayout layout, void* next) {
 	auto pool = get_pool();
 	if(!pool) return VK_NULL_HANDLE;
 	VkDescriptorSetAllocateInfo info = {
@@ -212,7 +190,7 @@ namespace vb::builder {
 	return set;
     }
 
-    void Descriptor::flush() {
+    void DescriptorAllocator::flush() {
 	for(auto pool: ready_pools) vkResetDescriptorPool(ctx->device, pool, 0);
 	for(auto pool: full_pools) {
 	    vkResetDescriptorPool(ctx->device, pool, 0);
@@ -221,14 +199,14 @@ namespace vb::builder {
 	full_pools.clear();
     }
 
-    void Descriptor::clean() {
+    void DescriptorAllocator::clean() {
 	for(auto pool: ready_pools) vkDestroyDescriptorPool(ctx->device, pool, nullptr);
 	for(auto pool: full_pools) vkDestroyDescriptorPool(ctx->device, pool, nullptr);
 	ready_pools.clear();
 	full_pools.clear();
     }
 
-    VkDescriptorPool Descriptor::get_pool() {
+    VkDescriptorPool DescriptorAllocator::get_pool() {
 	if(ready_pools.size() != 0) {
 	    auto pool = ready_pools.back();
 	    ready_pools.pop_back();
@@ -241,8 +219,8 @@ namespace vb::builder {
 	return pool;
     }
 
-    VkDescriptorPool Descriptor::create_pool(std::span<Ratio> pool_ratios, uint32_t init_sets,
-	    VkDescriptorPoolCreateFlags flags) {
+    VkDescriptorPool DescriptorAllocator::create_pool(std::span<Ratio> pool_ratios,
+	    uint32_t init_sets, VkDescriptorPoolCreateFlags flags) {
 	std::vector<VkDescriptorPoolSize> sizes(pool_ratios.size());
 	for(size_t i = 0; i < pool_ratios.size(); i++) {
 	    sizes[i].type = pool_ratios[i].type;
@@ -329,7 +307,7 @@ namespace vb::builder {
 	auto cmd = pool.allocate();
 	if(!cmd) return;
 	pool.submit_command_buffer_to_queue(cmd, [&](VkCommandBuffer cmd) {
-	    sync::transition_image(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	    transition_image(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 	    VkBufferImageCopy copy = {
 	        .imageSubresource = {
 	            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -338,7 +316,7 @@ namespace vb::builder {
 	        .imageExtent = extent,
 	    };
 	    vkCmdCopyBufferToImage(cmd, staging_buffer.buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-	    sync::transition_image(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	    transition_image(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	});
 	staging_buffer.clean();
     }
@@ -363,7 +341,7 @@ namespace vb::builder {
     }
 
     void GraphicsPipeline::add_shader(const char* path, VkShaderStageFlagBits stage) {
-	auto module = create::shader_module(ctx->device, path);
+	auto module = create_shader_module(ctx->device, path);
 	add_shader(module, stage);
     }
 
@@ -419,10 +397,8 @@ namespace vb::builder {
 	pipeline = VK_NULL_HANDLE;
 	layout = VK_NULL_HANDLE;
     }
-}
 
-namespace vb {
-    Context::Context(const Info& context_info): info{context_info} {
+    Context::Context(const ContextInfo& context_info): info{context_info} {
 	VB_ASSERT(volkInitialize() == VK_SUCCESS);
 	if(!(info.sdl3_init_flags & SDL_INIT_VIDEO)) info.sdl3_init_flags |= SDL_INIT_VIDEO;
 	if(!(info.sdl3_window_flags & SDL_WINDOW_VULKAN)) info.sdl3_window_flags |= SDL_WINDOW_VULKAN;
@@ -430,14 +406,12 @@ namespace vb {
 	window = SDL_CreateWindow(info.title.c_str(), info.width, info.height, info.sdl3_window_flags);
 	VB_ASSERT(window);
 	SDL_SetWindowMinimumSize(window, info.width, info.height);
-#ifndef NDEBUG
-	if(test_for_validation_layers()) validation_layers_support = true;
-	else log("Running debug build without support for Vulkan validation layers");
-#endif
+	if(info.enable_debug) {
+	    if(test_for_validation_layers()) validation_layers_support = true;
+	    else log("Running debug build without support for Vulkan validation layers");
+	}
 	create_instance();
-#ifndef NDEBUG
-	create_debug_messenger();
-#endif
+	if(info.enable_debug) create_debug_messenger();
 	pick_physical_device();
 	create_surface();
 	create_device();
@@ -461,13 +435,11 @@ namespace vb {
 	destroy_swapchain();
 	vkDestroyDevice(device, nullptr);
 	vkDestroySurfaceKHR(instance, surface, nullptr);
-#ifndef NDEBUG
-	if(validation_layers_support) {
+	if(info.enable_debug && validation_layers_support) {
 	    auto destroy_debug_utils_messenger = (PFN_vkDestroyDebugUtilsMessengerEXT)
 		vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
 	    destroy_debug_utils_messenger(instance, debug_messenger, nullptr);
 	}
-#endif
 	vkDestroyInstance(instance, nullptr);
 	SDL_DestroyWindow(window);
 	SDL_Quit();
@@ -491,7 +463,8 @@ namespace vb {
 		}
 	    }
 	}
-	if(validation_layers_support) extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	if(info.enable_debug && validation_layers_support)
+	    extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 	uint32_t available_implementation_api = 0;
 	uint32_t minor = 0;
 	if(vkGetInstanceProcAddr(NULL, "vkEnumerateInstanceVersion")) {
@@ -517,14 +490,13 @@ namespace vb {
 	    .enabledExtensionCount = (uint32_t)extensions.size(),
 	    .ppEnabledExtensionNames = (const char**)extensions.data(),
 	};
-#ifndef NDEBUG
-	auto debug_info = fill_debug_messenger_create_info();
-	if(validation_layers_support) {
+	VkDebugUtilsMessengerCreateInfoEXT debug_info;
+	if(this->info.enable_debug && validation_layers_support) {
+	    debug_info = fill_debug_messenger_create_info();
 	    info.enabledLayerCount = 1;
 	    info.ppEnabledLayerNames = validation_layer_name;
 	    info.pNext = &debug_info;
 	}
-#endif
 	VB_ASSERT(vkCreateInstance(&info, nullptr, &instance) == VK_SUCCESS);
 	volkLoadInstanceOnly(instance);
 	available_implementation_api_version = available_implementation_api;
@@ -639,12 +611,10 @@ namespace vb {
     	    .ppEnabledExtensionNames = ext.data(),
     	    .pEnabledFeatures = &features.features,
     	};
-#ifndef NDEBUG
-    	if(validation_layers_support) {
+    	if(this->info.enable_debug && validation_layers_support) {
     	    info.ppEnabledLayerNames = validation_layer_name;
     	    info.enabledLayerCount = 1;
     	}
-#endif
     	VB_ASSERT(vkCreateDevice(physical_device, &info, nullptr, &device) == VK_SUCCESS);
 	volkLoadDevice(device);
     	vkGetDeviceQueue(device, queues_info.graphics_index, 0, &queues_info.graphics_queue);
@@ -824,7 +794,6 @@ namespace vb {
         VB_ASSERT(vmaCreateAllocator(&info, &vma_allocator) == VK_SUCCESS);
     }
 
-#ifndef NDEBUG
     bool Context::test_for_validation_layers() {
         uint32_t count;
         vkEnumerateInstanceLayerProperties(&count, nullptr);
@@ -862,5 +831,4 @@ namespace vb {
         };
         return info;
     }
-#endif
 }
