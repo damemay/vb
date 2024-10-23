@@ -35,7 +35,12 @@ set(VB_LIBS
     m
 )
 
-include_directories(${VB_INCLUDE_DIRS})
+include_directories(
+    ${VB_INCLUDE_DIRS}
+    ext/imgui/
+    ext/imgui/backends/
+    ext/fastgltf/include/
+)
 
 add_library(${PROJECT_NAME}
     vb/vb.cc
@@ -53,8 +58,21 @@ endif()
 
 if(SAMPLE)
     find_package(glm REQUIRED)
+    add_compile_definitions(IMGUI_IMPL_VULKAN_USE_VOLK)
+    option(FASTGLTF_COMPILE_AS_CPP20 ON)
+    add_subdirectory(ext/fastgltf)
+    add_library(IMGUI
+	ext/imgui/imgui.cpp
+	ext/imgui/imgui_demo.cpp
+	ext/imgui/imgui_draw.cpp
+	ext/imgui/imgui_tables.cpp
+	ext/imgui/imgui_widgets.cpp
+	ext/imgui/backends/imgui_impl_sdl3.cpp
+	ext/imgui/backends/imgui_impl_vulkan.cpp
+    )
     set(WORKING_SAMPLES 
 	samples/compute.cc
+	samples/gltf_textures.cc
     )
     foreach(file ${WORKING_SAMPLES})
         get_filename_component(sample ${file} NAME_WLE)
@@ -63,6 +81,8 @@ if(SAMPLE)
         target_link_libraries(${SAMPLE_BINARY}
        	    ${PROJECT_NAME}
 	    ${VB_LIBS}
+	    IMGUI
+	    fastgltf::fastgltf
 	    glm::glm
         )
         if(CMAKE_BUILD_TYPE MATCHES "Debug")
